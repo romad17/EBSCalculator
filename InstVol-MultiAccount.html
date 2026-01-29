@@ -213,7 +213,9 @@
     const colConfig = [
         { key: 'acc', label: 'Account' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
         { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
-        { key: 'instType', label: 'Instance' }, { key: 'instSize', label: 'Class' }, { key: 'hv', label: 'Hypervisor' },
+        { key: 'instType', label: 'Instance' }, { key: 'instSize', label: 'Class' }, 
+        { key: 'ami', label: 'AMI ID' }, // New AMI Column
+        { key: 'hv', label: 'Hypervisor' },
         { key: 'os', label: 'OS' }, { key: 'boot', label: 'Boot' }, { key: 'iops', label: 'IOPS' }, { key: 'tput', label: 'Tput' },
         { key: 'worthiness', label: 'Autoscale Worthy' }
     ];
@@ -259,6 +261,7 @@
                         type: instType,
                         sizeSuffix: instType.includes('.') ? instType.split('.').pop() : "-",
                         hv: getHypervisor(instType),
+                        ami: parts[5] || "-", // Capturing AMI ID
                         os: parts[6] || "-",
                         root: parts[7] || "-"
                     });
@@ -286,15 +289,12 @@
                     const iopsVal = (p[2] === "None" || p[2] === "0") ? 0 : parseInt(p[2]);
                     const tputVal = (p[5] === "None" || p[5] === "0") ? 0 : parseInt(p[5]);
 
-                    // Worthiness Calculation Logic
                     let worth = "N/A";
                     if (dType === 'gp2' || dType === 'gp3') {
-                        // Side One: Baseline Cost
                         let sideOne = 0.08 * originalSize;
                         if (iopsVal > 3000) sideOne += (iopsVal - 3000) * 0.005;
                         if (tputVal > 125) sideOne += (tputVal - 125) * 0.04;
 
-                        // Side Two: Multi-Volume Optimized Cost
                         let sideTwo = (0.11 * originalSize / 3) * 1.2;
                         if (iopsVal > 3000) sideTwo += 2 * (iopsVal - 3000) * 0.005;
                         if (tputVal > 125) sideTwo += 2 * (tputVal - 125) * 0.04;
@@ -311,6 +311,7 @@
                         size: originalSize,
                         instType: meta ? meta.type : (instId === 'None' ? "Available" : instId),
                         instSize: meta ? meta.sizeSuffix : "-",
+                        ami: meta ? meta.ami : "-", // Mapping AMI ID to volume
                         hv: meta ? meta.hv : "-",
                         os: meta ? meta.os : "-",
                         boot: meta ? (p[0] === meta.root ? "Yes" : "No") : "No",
@@ -368,7 +369,6 @@
 
         data.forEach(v => {
             totalSize += v.size;
-
             accStatsMap[v.acc] = accStatsMap[v.acc] || { count: 0, size: 0 };
             accStatsMap[v.acc].count++;
             accStatsMap[v.acc].size += v.size;
@@ -392,8 +392,9 @@
                 <td style="font-family:monospace; color:#60a5fa">${v.path}</td>
                 <td><span class="${v.state === 'in-use' ? 'state-active' : 'state-available'}">${v.state}</span></td>
                 <td><span class="tag ${typeTag}">${v.diskType}</span></td>
-                <td><b style="color:var(--df-accent-blue)">${v.size.toLocaleString()}</b></td><td>${v.instType}</td><td>${v.instSize}</td>
-                <td><span class="tag ${hvTag}">${v.hv}</span></td>
+                <td><b style="color:var(--df-accent-blue)">${v.size.toLocaleString()}</b></td>
+                <td>${v.instType}</td><td>${v.instSize}</td>
+                <td style="font-family:monospace; font-size:10px;">${v.ami}</td> <td><span class="tag ${hvTag}">${v.hv}</span></td>
                 <td>${v.os}</td><td>${v.boot === 'Yes' ? '<span class="tag tag-boot">Boot</span>' : 'No'}</td>
                 <td>${v.iops ? v.iops.toLocaleString() : '-'}</td><td>${v.tput ? v.tput.toLocaleString() : '-'}</td>
                 <td style="color: ${worthColor}; font-weight: bold;">${v.worthiness}</td>
