@@ -261,7 +261,7 @@
                         type: instType,
                         sizeSuffix: instType.includes('.') ? instType.split('.').pop() : "-",
                         hv: getHypervisor(instType),
-                        ami: parts[5] || "-", // Capturing AMI ID
+                        ami: parts[2] || "-", // Capturing AMI ID
                         os: parts[6] || "-",
                         root: parts[7] || "-"
                     });
