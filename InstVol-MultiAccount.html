@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EBS Auto-Optimizer (Dark Edition)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --df-nav-dark: #020617;
+            --df-card-bg: #0f172a;
+            --df-action-blue: #3b82f6;
+            --df-accent-blue: #60a5fa;
+            --df-bg: #020617;
+            --df-border: #1e293b;
+            --df-text: #f1f5f9;
+            --df-text-light: #94a3b8;
+            --df-table-header: #1e293b;
+            --df-row-hover: #1e293b;
+            --df-success: #4ade80;
+            --df-danger: #f87171;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--df-bg);
+            margin: 0;
+            color: var(--df-text);
+        }
+
+        .navbar {
+            background-color: var(--df-nav-dark);
+            padding: 1rem 2.5rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            border-bottom: 1px solid var(--df-border);
+        }
+
+        .logo {
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+        }
+
+        .logo span {
+            color: var(--df-accent-blue);
+        }
+
+        .container {
+            padding: 2rem;
+            max-width: 100%;
+        }
+
+        .card {
+            background: var(--df-card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--df-border);
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            margin-bottom: 2rem;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        #searchBar {
+            flex-grow: 1;
+            padding: 0.8rem 1rem;
+            background-color: #1e293b;
+            border: 1px solid var(--df-border);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            outline: none;
+            color: white;
+        }
+
+        #searchBar:focus {
+            border-color: var(--df-action-blue);
+        }
+
+        .btn {
+            padding: 0.8rem 1.2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: 0.2s;
+            font-size: 0.85rem;
+        }
+
+        .btn-primary {
+            background: var(--df-action-blue);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--df-text);
+            border: 1px solid var(--df-border);
+        }
+
+        .btn-outline:hover {
+            background: #1e293b;
+        }
+
+        .btn-export {
+            border: 1px solid #10b981;
+            color: #10b981;
+        }
+
+        .btn-export:hover {
+            background: #064e3b;
+            color: white;
+        }
+
+        #stats-panel {
+            background: #1e293b;
+            border: 1px solid var(--df-border);
+            padding: 1.2rem;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+            color: var(--df-text);
+            max-width: 900px;
+        }
+
+        .stats-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 800;
+            font-size: 1rem;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--df-border);
+            padding-bottom: 8px;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #0f172a;
+            border-radius: 6px;
+            overflow: hidden;
+            font-size: 0.8rem;
+            border: 1px solid var(--df-border);
+            margin-bottom: 1rem;
+        }
+
+        .summary-table th {
+            background: var(--df-action-blue);
+            color: white;
+            padding: 8px 10px;
+            text-transform: none;
+            font-size: 0.75rem;
+            text-align: left;
+        }
+
+        .summary-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--df-border);
+            color: var(--df-text-light);
+        }
+
+        .summary-table tr:nth-child(even) {
+            background: #1e293b;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        th {
+            background: var(--df-table-header);
+            color: var(--df-text);
+            padding: 10px 6px;
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 2px solid var(--df-action-blue);
+            border-right: 1px solid var(--df-border);
+        }
+
+        td {
+            padding: 12px 6px;
+            border-bottom: 1px solid var(--df-border);
+            font-size: 12px;
+            color: var(--df-text-light);
+        }
+
+        tr:hover td {
+            background-color: var(--df-row-hover);
+            color: var(--df-text);
+        }
+
+        .filter-select {
+            width: 100%;
+            margin-top: 6px;
+            border: 1px solid var(--df-border);
+            border-radius: 4px;
+            font-size: 9px;
+            height: 70px;
+            background: #0f172a;
+            color: #94a3b8;
+        }
+
+        .tag {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .tag-gp3 {
+            background: #1e3a8a;
+            color: #bfdbfe;
+        }
+
+        .tag-gp2 {
+            background: #1e293b;
+            color: #94a3b8;
+        }
+
+        .tag-nitro {
+            background: #1e40af;
+            color: #dbeafe;
+            border: 1px solid #3b82f6;
+        }
+
+        .tag-xen {
+            background: #334155;
+            color: #cbd5e1;
+        }
+
+        .tag-boot {
+            background: #7f1d1d;
+            color: #fecaca;
+        }
+
+        .state-active {
+            color: #4ade80;
+            font-weight: 700;
+        }
+
+        .state-available {
+            color: #94a3b8;
+            font-style: italic;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #020617;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #334155;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="navbar">
+        <div class="logo">EBS <span>Calculator</span></div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <div class="controls">
+                <input type="file" id="fileInput" accept=".log,.txt" class="btn btn-outline">
+                <input type="text" id="searchBar" placeholder="Search accounts, volumes..." onkeyup="filterTable()">
+                <button class="btn btn-primary" onclick="applyDefaults()">Apply Optimization Defaults</button>
+                <button class="btn btn-outline" onclick="resetFilters()">Reset</button>
+                <button class="btn btn-outline btn-export" onclick="exportToCSV()">Export All (Full CSV)</button>
+            </div>
+
+            <div id="stats-panel" style="display:none;">
+                <div class="stats-header">
+                    <span id="vol-count"></span>
+                    <span id="size-sum" style="color: var(--df-accent-blue)"></span>
+                </div>
+
+                <div>
+                    <h4 style="margin: 0 0 8px 0; font-size: 0.85rem; color: var(--df-accent-blue);">Account Inventory
+                        Ranking</h4>
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th>AWS Account ID</th>
+                                <th style="text-align: center;">Volumes</th>
+                                <th style="text-align: right;">Total Size (GB)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="summary-table-body"></tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <h4 style="margin: 0 0 8px 0; font-size: 0.85rem; color: var(--df-accent-blue);">Throughput
+                        Performance Summary</h4>
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th style="text-align: center;">Throughput (MiB/s)</th>
+                                <th style="text-align: center;">IOPS</th>
+                                <th style="text-align: center;">Vol Type</th>
+                                <th style="text-align: center;">Vol Count</th>
+                                <th style="text-align: right;">Total Capacity (GB)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tput-summary-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table id="resultsTable" style="display:none;">
+                    <thead>
+                        <tr id="headerRow"></tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const nitroPrefixes = ['c5', 'c6', 'c7', 'm5', 'm6', 'm7', 'r5', 'r6', 'r7', 't3', 't4', 'x2', 'z1', 'p3', 'p4', 'g4', 'g5'];
+        let volumeData = [];
+        const colConfig = [
+            { key: 'acc', label: 'Account' }, { key: 'region', label: 'Region' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
+            { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
+            { key: 'instType', label: 'Instance' }, { key: 'instSize', label: 'Class' },
+            { key: 'ami', label: 'AMI ID' }, // New AMI Column
+            { key: 'hv', label: 'Hypervisor' },
+            { key: 'os', label: 'OS' }, { key: 'boot', label: 'Boot' }, { key: 'iops', label: 'IOPS' }, { key: 'tput', label: 'Tput' },
+            { key: 'worthiness', label: 'Autoscale Worthy' }
+        ];
+
+        const nitroFamilies = [
+            'm5', 'm5a', 'm5ad', 'm5d', 'm5dn', 'm5n', 'm5zn', 'm6a', 'm6g', 'm6gd', 'm6i', 'm6id', 'm6idn', 'm6in', 'm7a', 'm7g', 'm7gd', 'm7i', 'm7i-flex', 'm8a', 'm8g', 'm8gb', 'm8gd', 'm8gn', 'm8i', 'm8i-flex', 't3', 't3a', 't4g',
+            'c5', 'c5a', 'c5ad', 'c5d', 'c5n', 'c6a', 'c6g', 'c6gd', 'c6gn', 'c6i', 'c6id', 'c6in', 'c7a', 'c7g', 'c7gd', 'c7gn', 'c7i', 'c7i-flex', 'c8a', 'c8g', 'c8gb', 'c8gd', 'c8gn', 'c8i', 'c8i-flex',
+            'r5', 'r5a', 'r5ad', 'r5b', 'r5d', 'r5dn', 'r5n', 'r6a', 'r6g', 'r6gd', 'r6i', 'r6id', 'r6idn', 'r6in', 'r7a', 'r7g', 'r7gd', 'r7i', 'r7iz', 'r8a', 'r8g', 'r8gb', 'r8gd', 'r8gn', 'r8i', 'r8i-flex', 'u-3tb1', 'u-6tb1', 'u-9tb1', 'u-12tb1', 'u-18tb1', 'u-24tb1', 'u7i-6tb', 'u7i-8tb', 'u7i-12tb', 'u7in-16tb', 'u7in-24tb', 'u7in-32tb', 'u7inh-32tb', 'x2gd', 'x2idn', 'x2iedn', 'x2iezn', 'x8g', 'x8aedz', 'x8i', 'z1d',
+            'd3', 'd3en', 'i3en', 'i4g', 'i4i', 'i7i', 'i7ie', 'i8g', 'i8ge', 'im4gn', 'is4gen',
+            'dl1', 'dl2q', 'f2', 'g4ad', 'g4dn', 'g5', 'g5g', 'g6', 'g6e', 'g6f', 'gr6', 'gr6f', 'g7e', 'inf1', 'inf2', 'p4d', 'p4de', 'p5', 'p5e', 'p5en', 'p6-b200', 'p6-b300', 'p6e-gb200', 'trn1', 'trn1n', 'trn2', 'trn2u', 'vt1',
+            'hpc6a', 'hpc6id', 'hpc7a', 'hpc7g',
+            'a1', 'p3dn'
+        ];
+
+        const xenFamilies = [
+            'm1', 'm2', 'm3', 'm4', 't1', 't2',
+            'c1', 'c3', 'c4',
+            'r3', 'r4', 'x1', 'x1e',
+            'd2', 'h1', 'i2', 'i3',
+            'f1', 'g3', 'p2', 'p3'
+        ];
+
+        function getHypervisor(instanceType) {
+            if (!instanceType || instanceType === '-' || instanceType === 'None' || instanceType === 'Available') {
+                return "-";
+            }
+
+            const typeLower = instanceType.toLowerCase();
+            const family = typeLower.split('.')[0];
+
+            if (nitroFamilies.includes(family)) return "Nitro";
+            if (xenFamilies.includes(family)) return "Xen";
+
+            return "Unknown";
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => parseAndDisplay(event.target.result);
+            reader.readAsText(file);
+        });
+
+        function parseAndDisplay(rawText) {
+            const lines = rawText.split(/\r?\n/);
+            const instanceMap = new Map();
+            volumeData = [];
+            let curAcc = "Unknown Account";
+            let curRegion = "Unknown Region";
+
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.includes('Processing account ID:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                } else if (trimmed.startsWith('ACCOUNT:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                } else if (trimmed.startsWith('Scanning region:')) {
+                    curRegion = trimmed.split(':')[1].trim();
+                }
+
+                if ((trimmed.includes('x86_64') || trimmed.includes('arm64')) && trimmed.includes('i-')) {
+                    const parts = line.split('\t').map(item => item.trim());
+                    if (parts.length >= 5) {
+                        const instId = parts[3];
+                        const instType = parts[4];
+                        instanceMap.set(instId, {
+                            acc: curAcc,
+                            region: curRegion,
+                            type: instType,
+                            sizeSuffix: instType.includes('.') ? instType.split('.').pop() : "-",
+                            hv: getHypervisor(instType),
+                            ami: parts[2] || "-", // Capturing AMI ID
+                            os: parts[6] || "-",
+                            root: parts[7] || "-"
+                        });
+                    }
+                }
+            });
+
+            curAcc = "Unknown Account";
+            curRegion = "Unknown Region";
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.includes('Processing account ID:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                } else if (trimmed.startsWith('ACCOUNT:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                } else if (trimmed.startsWith('Scanning region:')) {
+                    curRegion = trimmed.split(':')[1].trim();
+                }
+
+                if (trimmed.includes('vol-') && !trimmed.includes('x86_64') && !trimmed.includes('arm64')) {
+                    const p = line.split('\t').map(item => item.trim());
+                    if (p.length >= 7) {
+                        const volId = p[6];
+                        const instId = p[1];
+                        const meta = instanceMap.get(instId);
+                        const originalSize = parseInt(p[3]) || 0;
+                        const dType = p[7] || "gp3";
+                        const iopsVal = (p[2] === "None" || p[2] === "0") ? 0 : parseInt(p[2]);
+                        const tputVal = (p[5] === "None" || p[5] === "0") ? 0 : parseInt(p[5]);
+
+                        let worth = "N/A";
+                        if (dType === 'gp2' || dType === 'gp3') {
+                            let sideOne = 0.08 * originalSize;
+                            if (iopsVal > 3000) sideOne += (iopsVal - 3000) * 0.005;
+                            if (tputVal > 125) sideOne += (tputVal - 125) * 0.04;
+
+                            let sideTwo = (0.11 * originalSize / 3) * 1.2;
+                            if (iopsVal > 3000) sideTwo += 2 * (iopsVal - 3000) * 0.005;
+                            if (tputVal > 125) sideTwo += 2 * (tputVal - 125) * 0.04;
+
+                            worth = (sideTwo > sideOne) ? "Not Economical" : "Economical";
+                        }
+
+                        volumeData.push({
+                            acc: curAcc,
+                            region: meta ? meta.region : curRegion,
+                            id: volId,
+                            path: p[0] === 'None' ? "-" : p[0],
+                            state: p[4],
+                            diskType: dType,
+                            size: originalSize,
+                            instType: meta ? meta.type : (instId === 'None' ? "Available" : instId),
+                            instSize: meta ? meta.sizeSuffix : "-",
+                            ami: meta ? meta.ami : "-", // Mapping AMI ID to volume
+                            hv: meta ? meta.hv : "-",
+                            os: meta ? meta.os : "-",
+                            boot: meta ? (p[0] === meta.root ? "Yes" : "No") : "No",
+                            iops: iopsVal,
+                            tput: tputVal,
+                            worthiness: worth
+                        });
+                    }
+                }
+            });
+
+            initHeaders();
+            populateDropdowns();
+            renderTable(volumeData);
+            document.getElementById('stats-panel').style.display = 'block';
+        }
+
+        function initHeaders() {
+            const headerRow = document.getElementById('headerRow');
+            headerRow.innerHTML = '';
+            colConfig.forEach(col => {
+                const th = document.createElement('th');
+                th.innerHTML = `<div id="label-${col.key}">${col.label}</div><select id="filter-${col.key}" class="filter-select" multiple onchange="filterTable()"></select>`;
+                headerRow.appendChild(th);
+            });
+        }
+
+        function populateDropdowns() {
+            colConfig.forEach(col => {
+                const select = document.getElementById('filter-' + col.key);
+                const uniqueValues = [...new Set(volumeData.map(v => v[col.key]))].sort((a, b) => {
+                    if (!isNaN(a) && !isNaN(b)) return a - b;
+                    return String(a).localeCompare(String(b));
+                });
+                select.innerHTML = '';
+                uniqueValues.forEach(val => {
+                    const opt = document.createElement('option');
+                    opt.value = val; opt.textContent = val;
+                    select.appendChild(opt);
+                });
+            });
+        }
+
+        function renderTable(data) {
+            const body = document.getElementById('tableBody');
+            body.innerHTML = '';
+            const summaryBody = document.getElementById('summary-table-body');
+            summaryBody.innerHTML = '';
+            const tputSummaryBody = document.getElementById('tput-summary-body');
+            tputSummaryBody.innerHTML = '';
+
+            let totalSize = 0;
+            let accStatsMap = {};
+            let tputStatsMap = {};
+
+            data.forEach(v => {
+                totalSize += v.size;
+                accStatsMap[v.acc] = accStatsMap[v.acc] || { count: 0, size: 0 };
+                accStatsMap[v.acc].count++;
+                accStatsMap[v.acc].size += v.size;
+
+                const tputVal = v.tput || 0;
+                const iopsVal = v.iops || 0;
+                const typeVal = v.diskType || "unknown";
+                const tpKey = `${tputVal}_${iopsVal}_${typeVal}`;
+
+                tputStatsMap[tpKey] = tputStatsMap[tpKey] || { tput: tputVal, iops: iopsVal, type: typeVal, count: 0, size: 0 };
+                tputStatsMap[tpKey].count++;
+                tputStatsMap[tpKey].size += v.size;
+
+                const row = body.insertRow();
+                const hvTag = v.hv === "Nitro" ? "tag-nitro" : "tag-xen";
+                const typeTag = v.diskType === 'gp3' ? "tag-gp3" : "tag-gp2";
+                const worthColor = v.worthiness === "Economical" ? "var(--df-success)" : (v.worthiness === "Not Economical" ? "var(--df-danger)" : "var(--df-text-light)");
+
+                row.innerHTML = `
+                <td style="color:#94a3b8">${v.acc}</td><td>${v.region}</td><td><b style="color:#fff">${v.id}</b></td>
+                <td style="font-family:monospace; color:#60a5fa">${v.path}</td>
+                <td><span class="${v.state === 'in-use' ? 'state-active' : 'state-available'}">${v.state}</span></td>
+                <td><span class="tag ${typeTag}">${v.diskType}</span></td>
+                <td><b style="color:var(--df-accent-blue)">${v.size.toLocaleString()}</b></td>
+                <td>${v.instType}</td><td>${v.instSize}</td>
+                <td style="font-family:monospace; font-size:10px;">${v.ami}</td> <td><span class="tag ${hvTag}">${v.hv}</span></td>
+                <td>${v.os}</td><td>${v.boot === 'Yes' ? '<span class="tag tag-boot">Boot</span>' : 'No'}</td>
+                <td>${v.iops ? v.iops.toLocaleString() : '-'}</td><td>${v.tput ? v.tput.toLocaleString() : '-'}</td>
+                <td style="color: ${worthColor}; font-weight: bold;">${v.worthiness}</td>
+            `;
+            });
+
+            const sortedStats = Object.entries(accStatsMap).sort((a, b) => b[1].size - a[1].size);
+            sortedStats.forEach(([acc, stat]) => {
+                const row = summaryBody.insertRow();
+                row.innerHTML = `<td>${acc}</td><td style="text-align: center;">${stat.count}</td><td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
+            });
+
+            const sortedTput = Object.values(tputStatsMap).sort((a, b) => {
+                if (b.tput !== a.tput) return b.tput - a.tput;
+                if (b.iops !== a.iops) return b.iops - a.iops;
+                return a.type.localeCompare(b.type);
+            });
+
+            sortedTput.forEach(stat => {
+                const row = tputSummaryBody.insertRow();
+                row.innerHTML = `
+                <td style="text-align: center; color: white; font-weight: 600;">${stat.tput}</td>
+                <td style="text-align: center; color: #f1f5f9;">${stat.iops.toLocaleString()}</td>
+                <td style="text-align: center; font-family: monospace; color: #60a5fa;">${stat.type}</td>
+                <td style="text-align: center;">${stat.count}</td>
+                <td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>
+            `;
+            });
+
+            document.getElementById('resultsTable').style.display = 'table';
+            document.getElementById('vol-count').innerText = `${data.length} Volumes Filtered`;
+            document.getElementById('size-sum').innerText = `TOTAL CAPACITY: ${totalSize.toLocaleString()} GB`;
+
+            colConfig.forEach(col => {
+                const select = document.getElementById('filter-' + col.key);
+                if (select) {
+                    document.getElementById('label-' + col.key).textContent = `${col.label} (${Array.from(select.selectedOptions).length}/${select.options.length})`;
+                }
+            });
+        }
+
+        function applyDefaults() {
+            colConfig.forEach(col => {
+                const select = document.getElementById('filter-' + col.key);
+                if (select) Array.from(select.options).forEach(o => o.selected = false);
+            });
+            const largeSizes = ['xlarge', '3xlarge', '2xlarge', '4xlarge', '6xlarge', '8xlarge', '9xlarge', '12xlarge', '16xlarge', '24xlarge', '32xlarge', 'metal'];
+            const targetOS = ['Linux/UNIX', 'Red Hat Enterprise Linux', 'Red Hat BYOL Linux'];
+            Array.from(document.getElementById('filter-diskType').options).forEach(o => { if (['gp2', 'gp3'].includes(o.value)) o.selected = true; });
+            Array.from(document.getElementById('filter-size').options).forEach(o => { if (parseInt(o.value) >= 50) o.selected = true; });
+            Array.from(document.getElementById('filter-hv').options).forEach(o => { if (o.value === 'Nitro') o.selected = true; });
+            Array.from(document.getElementById('filter-boot').options).forEach(o => { if (o.value === 'No') o.selected = true; });
+            Array.from(document.getElementById('filter-os').options).forEach(o => { if (targetOS.includes(o.value)) o.selected = true; });
+            Array.from(document.getElementById('filter-instSize').options).forEach(o => { if (largeSizes.includes(o.value)) o.selected = true; });
+            filterTable();
+        }
+
+        function resetFilters() {
+            document.getElementById('searchBar').value = '';
+            colConfig.forEach(col => Array.from(document.getElementById('filter-' + col.key).options).forEach(o => o.selected = false));
+            filterTable();
+        }
+
+        function filterTable() {
+            const glob = document.getElementById('searchBar').value.toUpperCase();
+            const filters = colConfig.map(c => Array.from(document.getElementById('filter-' + c.key).selectedOptions).map(o => o.value));
+            const filtered = volumeData.filter(v => {
+                const matchesGlobal = glob === "" || Object.values(v).some(val => String(val).toUpperCase().includes(glob));
+                const matchesDrops = colConfig.every((col, i) => filters[i].length === 0 || filters[i].includes(String(v[col.key])));
+                return matchesGlobal && matchesDrops;
+            });
+            renderTable(filtered);
+        }
+
+        function exportToCSV() {
+            if (volumeData.length === 0) return alert("No data to export.");
+            const headers = colConfig.map(col => col.label).join(",");
+            const csvRows = volumeData.map(row => colConfig.map(col => `"${String(row[col.key]).replace(/"/g, '""')}"`).join(","));
+            const blob = new Blob([[headers, ...csvRows].join("\n")], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `ebs_inventory_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+
+</html>
