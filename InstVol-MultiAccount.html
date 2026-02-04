@@ -412,14 +412,20 @@
                 const trimmed = line.trim();
                 if (trimmed.includes('Processing account ID:')) {
                     curAcc = trimmed.split(':')[1].trim();
+                    console.log("Set current account to:", curAcc);
                 } else if (trimmed.startsWith('ACCOUNT:')) {
                     curAcc = trimmed.split(':')[1].trim();
-                } else if (trimmed.startsWith('Scanning region:')) {
+                    console.log("Set current account to:", curAcc);
+                } else if (trimmed.includes('region:')) {
                     curRegion = trimmed.split(':')[1].trim();
+                    console.log("Set current region to:", curRegion);
                 }
 
                 if ((trimmed.includes('x86_64') || trimmed.includes('arm64')) && trimmed.includes('i-')) {
-                    const parts = line.split('\t').map(item => item.trim());
+                    //const parts = line.split('\t').map(item => item.trim());
+                    const parts = line.includes('\t')
+                        ? line.split('\t').map(item => item.trim())
+                        : line.trim().split(/\s+/);
                     if (parts.length >= 5) {
                         const instId = parts[3];
                         const instType = parts[4];
@@ -450,7 +456,10 @@
                 }
 
                 if (trimmed.includes('vol-') && !trimmed.includes('x86_64') && !trimmed.includes('arm64')) {
-                    const p = line.split('\t').map(item => item.trim());
+                    //const p = line.split('\t').map(item => item.trim());
+                    const p = line.includes('\t')
+                        ? line.split('\t').map(item => item.trim())
+                        : line.trim().split(/\s+/);
                     if (p.length >= 7) {
                         const volId = p[6];
                         const instId = p[1];
