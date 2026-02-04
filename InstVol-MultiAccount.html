@@ -177,6 +177,41 @@
             background: #1e293b;
         }
 
+        /* Funnel Styles */
+        .funnel-step {
+            display: flex;
+            align-items: center;
+            height: 32px;
+            border-radius: 4px;
+            transition: width 0.4s ease-in-out;
+            position: relative;
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid var(--df-action-blue);
+        }
+
+        .funnel-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--df-action-blue), var(--df-accent-blue));
+            display: flex;
+            align-items: center;
+            padding-left: 12px;
+            white-space: nowrap;
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .funnel-label {
+            position: absolute;
+            left: calc(100% + 15px);
+            width: 250px;
+            text-align: left;
+            font-size: 11px;
+            color: var(--df-text-light);
+            font-weight: 500;
+        }
+
         table {
             width: 100%;
             border-collapse: separate;
@@ -337,6 +372,12 @@
                 </div>
             </div>
 
+            <div id="funnel-container" class="card" style="display:none; background: #020617; border-color: #334155; margin-bottom: 2rem;">
+                <h4 style="margin: 0 0 20px 0; font-size: 0.9rem; color: var(--df-accent-blue); text-align: center; text-transform: uppercase; letter-spacing: 0.05em;">Capacity Optimization Funnel</h4>
+                <div id="funnel-bars" style="display: flex; flex-direction: column; gap: 12px; max-width: 600px; margin: 0 auto; padding-right: 200px;">
+                    </div>
+            </div>
+
             <div style="overflow-x: auto;">
                 <table id="resultsTable" style="display:none;">
                     <thead>
@@ -355,7 +396,7 @@
             { key: 'acc', label: 'Account' }, { key: 'region', label: 'Region' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
             { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
             { key: 'instType', label: 'Instance' }, { key: 'instSize', label: 'Class' },
-            { key: 'ami', label: 'AMI ID' }, // New AMI Column
+            { key: 'ami', label: 'AMI ID' }, 
             { key: 'hv', label: 'Hypervisor' },
             { key: 'os', label: 'OS' }, { key: 'boot', label: 'Boot' }, { key: 'iops', label: 'IOPS' }, { key: 'tput', label: 'Tput' },
             { key: 'worthiness', label: 'Autoscale Worthy' }
@@ -380,16 +421,10 @@
         ];
 
         function getHypervisor(instanceType) {
-            if (!instanceType || instanceType === '-' || instanceType === 'None' || instanceType === 'Available') {
-                return "-";
-            }
-
-            const typeLower = instanceType.toLowerCase();
-            const family = typeLower.split('.')[0];
-
+            if (!instanceType || instanceType === '-' || instanceType === 'None' || instanceType === 'Available') return "-";
+            const family = instanceType.toLowerCase().split('.')[0];
             if (nitroFamilies.includes(family)) return "Nitro";
             if (xenFamilies.includes(family)) return "Xen";
-
             return "Unknown";
         }
 
@@ -405,100 +440,54 @@
             const lines = rawText.split(/\r?\n/);
             const instanceMap = new Map();
             volumeData = [];
-            let curAcc = "Unknown Account";
-            let curRegion = "Unknown Region";
+            let curAcc = "Unknown Account", curRegion = "Unknown Region";
 
             lines.forEach(line => {
                 const trimmed = line.trim();
-                if (trimmed.includes('Processing account ID:')) {
+                if (trimmed.includes('Processing account ID:') || trimmed.startsWith('ACCOUNT:')) {
                     curAcc = trimmed.split(':')[1].trim();
-                    console.log("Set current account to:", curAcc);
-                } else if (trimmed.startsWith('ACCOUNT:')) {
-                    curAcc = trimmed.split(':')[1].trim();
-                    console.log("Set current account to:", curAcc);
                 } else if (trimmed.includes('region:')) {
                     curRegion = trimmed.split(':')[1].trim();
-                    console.log("Set current region to:", curRegion);
                 }
-
                 if ((trimmed.includes('x86_64') || trimmed.includes('arm64')) && trimmed.includes('i-')) {
-                    //const parts = line.split('\t').map(item => item.trim());
-                    const parts = line.includes('\t')
-                        ? line.split('\t').map(item => item.trim())
-                        : line.trim().split(/\s+/);
+                    const parts = line.includes('\t') ? line.split('\t').map(item => item.trim()) : line.trim().split(/\s+/);
                     if (parts.length >= 5) {
-                        const instId = parts[3];
-                        const instType = parts[4];
+                        const instId = parts[3], instType = parts[4];
                         instanceMap.set(instId, {
-                            acc: curAcc,
-                            region: curRegion,
-                            type: instType,
+                            acc: curAcc, region: curRegion, type: instType,
                             sizeSuffix: instType.includes('.') ? instType.split('.').pop() : "-",
-                            hv: getHypervisor(instType),
-                            ami: parts[2] || "-", // Capturing AMI ID
-                            os: parts[6] || "-",
-                            root: parts[7] || "-"
+                            hv: getHypervisor(instType), ami: parts[2] || "-", os: parts[6] || "-", root: parts[7] || "-"
                         });
                     }
                 }
             });
 
-            curAcc = "Unknown Account";
-            curRegion = "Unknown Region";
+            curAcc = "Unknown Account"; curRegion = "Unknown Region";
             lines.forEach(line => {
                 const trimmed = line.trim();
-                if (trimmed.includes('Processing account ID:')) {
-                    curAcc = trimmed.split(':')[1].trim();
-                } else if (trimmed.startsWith('ACCOUNT:')) {
-                    curAcc = trimmed.split(':')[1].trim();
-                } else if (trimmed.startsWith('Scanning region:')) {
-                    curRegion = trimmed.split(':')[1].trim();
-                }
+                if (trimmed.includes('Processing account ID:') || trimmed.startsWith('ACCOUNT:')) curAcc = trimmed.split(':')[1].trim();
+                else if (trimmed.startsWith('Scanning region:')) curRegion = trimmed.split(':')[1].trim();
 
                 if (trimmed.includes('vol-') && !trimmed.includes('x86_64') && !trimmed.includes('arm64')) {
-                    //const p = line.split('\t').map(item => item.trim());
-                    const p = line.includes('\t')
-                        ? line.split('\t').map(item => item.trim())
-                        : line.trim().split(/\s+/);
+                    const p = line.includes('\t') ? line.split('\t').map(item => item.trim()) : line.trim().split(/\s+/);
                     if (p.length >= 7) {
-                        const volId = p[6];
-                        const instId = p[1];
-                        const meta = instanceMap.get(instId);
-                        const originalSize = parseInt(p[3]) || 0;
-                        const dType = p[7] || "gp3";
+                        const volId = p[6], instId = p[1], meta = instanceMap.get(instId);
+                        const originalSize = parseInt(p[3]) || 0, dType = p[7] || "gp3";
                         const iopsVal = (p[2] === "None" || p[2] === "0") ? 0 : parseInt(p[2]);
                         const tputVal = (p[5] === "None" || p[5] === "0") ? 0 : parseInt(p[5]);
 
                         let worth = "N/A";
                         if (dType === 'gp2' || dType === 'gp3') {
-                            let sideOne = 0.08 * originalSize;
-                            if (iopsVal > 3000) sideOne += (iopsVal - 3000) * 0.005;
-                            if (tputVal > 125) sideOne += (tputVal - 125) * 0.04;
-
-                            let sideTwo = (0.11 * originalSize / 3) * 1.2;
-                            if (iopsVal > 3000) sideTwo += 2 * (iopsVal - 3000) * 0.005;
-                            if (tputVal > 125) sideTwo += 2 * (tputVal - 125) * 0.04;
-
-                            worth = (sideTwo > sideOne) ? "Not Economical" : "Economical";
+                            let s1 = 0.08 * originalSize + (iopsVal > 3000 ? (iopsVal-3000)*0.005 : 0) + (tputVal > 125 ? (tputVal-125)*0.04 : 0);
+                            let s2 = ((0.11 * originalSize / 3) * 1.2) + (iopsVal > 3000 ? 2*(iopsVal-3000)*0.005 : 0) + (tputVal > 125 ? 2*(tputVal-125)*0.04 : 0);
+                            worth = (s2 > s1) ? "Not Economical" : "Economical";
                         }
 
                         volumeData.push({
-                            acc: curAcc,
-                            region: meta ? meta.region : curRegion,
-                            id: volId,
-                            path: p[0] === 'None' ? "-" : p[0],
-                            state: p[4],
-                            diskType: dType,
-                            size: originalSize,
-                            instType: meta ? meta.type : (instId === 'None' ? "Available" : instId),
-                            instSize: meta ? meta.sizeSuffix : "-",
-                            ami: meta ? meta.ami : "-", // Mapping AMI ID to volume
-                            hv: meta ? meta.hv : "-",
-                            os: meta ? meta.os : "-",
-                            boot: meta ? (p[0] === meta.root ? "Yes" : "No") : "No",
-                            iops: iopsVal,
-                            tput: tputVal,
-                            worthiness: worth
+                            acc: curAcc, region: meta ? meta.region : curRegion, id: volId, path: p[0] === 'None' ? "-" : p[0],
+                            state: p[4], diskType: dType, size: originalSize, instType: meta ? meta.type : (instId === 'None' ? "Available" : instId),
+                            instSize: meta ? meta.sizeSuffix : "-", ami: meta ? meta.ami : "-", hv: meta ? meta.hv : "-",
+                            os: meta ? meta.os : "-", boot: meta ? (p[0] === meta.root ? "Yes" : "No") : "No", iops: iopsVal, tput: tputVal, worthiness: worth
                         });
                     }
                 }
@@ -508,6 +497,7 @@
             populateDropdowns();
             renderTable(volumeData);
             document.getElementById('stats-panel').style.display = 'block';
+            document.getElementById('funnel-container').style.display = 'block';
         }
 
         function initHeaders() {
@@ -523,49 +513,89 @@
         function populateDropdowns() {
             colConfig.forEach(col => {
                 const select = document.getElementById('filter-' + col.key);
-                const uniqueValues = [...new Set(volumeData.map(v => v[col.key]))].sort((a, b) => {
-                    if (!isNaN(a) && !isNaN(b)) return a - b;
-                    return String(a).localeCompare(String(b));
-                });
+                const uniqueValues = [...new Set(volumeData.map(v => v[col.key]))].sort((a, b) => !isNaN(a) && !isNaN(b) ? a - b : String(a).localeCompare(String(b)));
                 select.innerHTML = '';
                 uniqueValues.forEach(val => {
                     const opt = document.createElement('option');
-                    opt.value = val; opt.textContent = val;
-                    select.appendChild(opt);
+                    opt.value = val; opt.textContent = val; select.appendChild(opt);
                 });
             });
         }
 
-        function renderTable(data) {
-            const body = document.getElementById('tableBody');
-            body.innerHTML = '';
-            const summaryBody = document.getElementById('summary-table-body');
-            summaryBody.innerHTML = '';
-            const tputSummaryBody = document.getElementById('tput-summary-body');
-            tputSummaryBody.innerHTML = '';
+function updateFunnel(filteredData) {
+            const funnelBars = document.getElementById('funnel-bars');
+            funnelBars.innerHTML = '';
+            
+            let currentData = [...volumeData];
+            // The specific order requested for the capacity drain
+            const steps = [
+                { label: "Total Inventory Capacity", key: "total" },
+                { label: "Step 1: OS Filter", key: "os" },
+                { label: "Step 2: Hypervisor (Nitro/Xen)", key: "hv" },
+                { label: "Step 3: Boot Volume Status", key: "boot" },
+                { label: "Step 4: EBS Type (gp2/gp3)", key: "diskType" },
+                { label: "Step 5: Volume Size", key: "size" },
+                { label: "Step 6: Instance Size (Class)", key: "instSize" },
+                { label: "Step 7: State (In-use/Available)", key: "state" },
+                { label: "Final: Filtered Targets", key: "final" }
+            ];
 
-            let totalSize = 0;
-            let accStatsMap = {};
-            let tputStatsMap = {};
+            const totalBase = volumeData.reduce((s, v) => s + v.size, 0);
+
+            steps.forEach(step => {
+                let stepSize = 0;
+                if (step.key === "total") {
+                    stepSize = totalBase;
+                } else if (step.key === "final") {
+                    stepSize = filteredData.reduce((s, v) => s + v.size, 0);
+                } else {
+                    // Apply cumulative filter based on current dropdown selections
+                    const select = document.getElementById('filter-' + step.key);
+                    const activeFilters = select ? Array.from(select.selectedOptions).map(o => o.value) : [];
+                    
+                    if (activeFilters.length > 0) {
+                        currentData = currentData.filter(v => activeFilters.includes(String(v[step.key])));
+                    }
+                    stepSize = currentData.reduce((s, v) => s + v.size, 0);
+                }
+
+                const pct = totalBase > 0 ? (stepSize / totalBase) * 100 : 0;
+                const row = document.createElement('div');
+                row.className = 'funnel-step';
+                
+                // Visual tapering effect: width is based on remaining capacity percentage
+                row.style.width = `${Math.max(pct, 10)}%`; 
+                row.style.margin = "0 auto";
+                
+                row.innerHTML = `
+                    <div class="funnel-bar-fill" style="width: 100%">
+                        ${stepSize.toLocaleString()} GB
+                    </div>
+                    <div class="funnel-label">${step.label}</div>
+                `;
+                funnelBars.appendChild(row);
+            });
+        }
+
+        function renderTable(data) {
+            updateFunnel(data);
+            const body = document.getElementById('tableBody'); body.innerHTML = '';
+            const summaryBody = document.getElementById('summary-table-body'); summaryBody.innerHTML = '';
+            const tputSummaryBody = document.getElementById('tput-summary-body'); tputSummaryBody.innerHTML = '';
+
+            let totalSize = 0, accStatsMap = {}, tputStatsMap = {};
 
             data.forEach(v => {
                 totalSize += v.size;
                 accStatsMap[v.acc] = accStatsMap[v.acc] || { count: 0, size: 0 };
-                accStatsMap[v.acc].count++;
-                accStatsMap[v.acc].size += v.size;
+                accStatsMap[v.acc].count++; accStatsMap[v.acc].size += v.size;
 
-                const tputVal = v.tput || 0;
-                const iopsVal = v.iops || 0;
-                const typeVal = v.diskType || "unknown";
-                const tpKey = `${tputVal}_${iopsVal}_${typeVal}`;
-
-                tputStatsMap[tpKey] = tputStatsMap[tpKey] || { tput: tputVal, iops: iopsVal, type: typeVal, count: 0, size: 0 };
-                tputStatsMap[tpKey].count++;
-                tputStatsMap[tpKey].size += v.size;
+                const tpKey = `${v.tput}_${v.iops}_${v.diskType}`;
+                tputStatsMap[tpKey] = tputStatsMap[tpKey] || { tput: v.tput, iops: v.iops, type: v.diskType, count: 0, size: 0 };
+                tputStatsMap[tpKey].count++; tputStatsMap[tpKey].size += v.size;
 
                 const row = body.insertRow();
-                const hvTag = v.hv === "Nitro" ? "tag-nitro" : "tag-xen";
-                const typeTag = v.diskType === 'gp3' ? "tag-gp3" : "tag-gp2";
+                const hvTag = v.hv === "Nitro" ? "tag-nitro" : "tag-xen", typeTag = v.diskType === 'gp3' ? "tag-gp3" : "tag-gp2";
                 const worthColor = v.worthiness === "Economical" ? "var(--df-success)" : (v.worthiness === "Not Economical" ? "var(--df-danger)" : "var(--df-text-light)");
 
                 row.innerHTML = `
@@ -574,35 +604,18 @@
                 <td><span class="${v.state === 'in-use' ? 'state-active' : 'state-available'}">${v.state}</span></td>
                 <td><span class="tag ${typeTag}">${v.diskType}</span></td>
                 <td><b style="color:var(--df-accent-blue)">${v.size.toLocaleString()}</b></td>
-                <td>${v.instType}</td><td>${v.instSize}</td>
-                <td style="font-family:monospace; font-size:10px;">${v.ami}</td> <td><span class="tag ${hvTag}">${v.hv}</span></td>
-                <td>${v.os}</td><td>${v.boot === 'Yes' ? '<span class="tag tag-boot">Boot</span>' : 'No'}</td>
+                <td>${v.instType}</td><td>${v.instSize}</td><td style="font-family:monospace; font-size:10px;">${v.ami}</td>
+                <td><span class="tag ${hvTag}">${v.hv}</span></td><td>${v.os}</td><td>${v.boot === 'Yes' ? '<span class="tag tag-boot">Boot</span>' : 'No'}</td>
                 <td>${v.iops ? v.iops.toLocaleString() : '-'}</td><td>${v.tput ? v.tput.toLocaleString() : '-'}</td>
-                <td style="color: ${worthColor}; font-weight: bold;">${v.worthiness}</td>
-            `;
+                <td style="color: ${worthColor}; font-weight: bold;">${v.worthiness}</td>`;
             });
 
-            const sortedStats = Object.entries(accStatsMap).sort((a, b) => b[1].size - a[1].size);
-            sortedStats.forEach(([acc, stat]) => {
-                const row = summaryBody.insertRow();
-                row.innerHTML = `<td>${acc}</td><td style="text-align: center;">${stat.count}</td><td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
+            Object.entries(accStatsMap).sort((a, b) => b[1].size - a[1].size).forEach(([acc, stat]) => {
+                summaryBody.insertRow().innerHTML = `<td>${acc}</td><td style="text-align: center;">${stat.count}</td><td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
             });
 
-            const sortedTput = Object.values(tputStatsMap).sort((a, b) => {
-                if (b.tput !== a.tput) return b.tput - a.tput;
-                if (b.iops !== a.iops) return b.iops - a.iops;
-                return a.type.localeCompare(b.type);
-            });
-
-            sortedTput.forEach(stat => {
-                const row = tputSummaryBody.insertRow();
-                row.innerHTML = `
-                <td style="text-align: center; color: white; font-weight: 600;">${stat.tput}</td>
-                <td style="text-align: center; color: #f1f5f9;">${stat.iops.toLocaleString()}</td>
-                <td style="text-align: center; font-family: monospace; color: #60a5fa;">${stat.type}</td>
-                <td style="text-align: center;">${stat.count}</td>
-                <td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>
-            `;
+            Object.values(tputStatsMap).sort((a, b) => b.tput - a.tput || b.iops - a.iops).forEach(stat => {
+                tputSummaryBody.insertRow().innerHTML = `<td style="text-align: center; color: white; font-weight: 600;">${stat.tput}</td><td style="text-align: center;">${stat.iops.toLocaleString()}</td><td style="text-align: center; font-family: monospace; color: #60a5fa;">${stat.type}</td><td style="text-align: center;">${stat.count}</td><td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
             });
 
             document.getElementById('resultsTable').style.display = 'table';
@@ -611,31 +624,26 @@
 
             colConfig.forEach(col => {
                 const select = document.getElementById('filter-' + col.key);
-                if (select) {
-                    document.getElementById('label-' + col.key).textContent = `${col.label} (${Array.from(select.selectedOptions).length}/${select.options.length})`;
-                }
+                if (select) document.getElementById('label-' + col.key).textContent = `${col.label} (${Array.from(select.selectedOptions).length}/${select.options.length})`;
             });
         }
 
         function applyDefaults() {
-            colConfig.forEach(col => {
-                const select = document.getElementById('filter-' + col.key);
-                if (select) Array.from(select.options).forEach(o => o.selected = false);
-            });
-            const largeSizes = ['xlarge', '3xlarge', '2xlarge', '4xlarge', '6xlarge', '8xlarge', '9xlarge', '12xlarge', '16xlarge', '24xlarge', '32xlarge', 'metal'];
+            colConfig.forEach(c => Array.from(document.getElementById('filter-' + c.key).options).forEach(o => o.selected = false));
+            const large = ['xlarge', '3xlarge', '2xlarge', '4xlarge', '6xlarge', '8xlarge', '9xlarge', '12xlarge', '16xlarge', '24xlarge', '32xlarge', 'metal'];
             const targetOS = ['Linux/UNIX', 'Red Hat Enterprise Linux', 'Red Hat BYOL Linux'];
             Array.from(document.getElementById('filter-diskType').options).forEach(o => { if (['gp2', 'gp3'].includes(o.value)) o.selected = true; });
             Array.from(document.getElementById('filter-size').options).forEach(o => { if (parseInt(o.value) >= 50) o.selected = true; });
             Array.from(document.getElementById('filter-hv').options).forEach(o => { if (o.value === 'Nitro') o.selected = true; });
             Array.from(document.getElementById('filter-boot').options).forEach(o => { if (o.value === 'No') o.selected = true; });
             Array.from(document.getElementById('filter-os').options).forEach(o => { if (targetOS.includes(o.value)) o.selected = true; });
-            Array.from(document.getElementById('filter-instSize').options).forEach(o => { if (largeSizes.includes(o.value)) o.selected = true; });
+            Array.from(document.getElementById('filter-instSize').options).forEach(o => { if (large.includes(o.value)) o.selected = true; });
             filterTable();
         }
 
         function resetFilters() {
             document.getElementById('searchBar').value = '';
-            colConfig.forEach(col => Array.from(document.getElementById('filter-' + col.key).options).forEach(o => o.selected = false));
+            colConfig.forEach(c => Array.from(document.getElementById('filter-' + c.key).options).forEach(o => o.selected = false));
             filterTable();
         }
 
