@@ -440,88 +440,96 @@
             reader.readAsText(file);
         });
 
-function parseAndDisplay(rawText) {
-    volumeData = [];
-    const accountMatch = rawText.match(/Account ID: (\d+)/);
-    const curAcc = accountMatch ? accountMatch[1] : "Unknown Account";
+        function parseAndDisplay(rawText) {
+            volumeData = [];
+            const accountMatch = rawText.match(/Account ID: (\d+)/);
+            const curAcc = accountMatch ? accountMatch[1] : "Unknown Account";
 
-    // Step 1: Clean the entire raw text of tags that break the JSON
-    const cleanedFullText = rawText.replace(/\//g, '');
+            // Step 1: escape "/" to prevent regex issues in JSON parsing (if any paths contain them)
+            const cleanedFullText = rawText.replace(/\//g, '\\/');
 
-    // Step 2: Split by region
-    const regionBlocks = cleanedFullText.split(/Scanning region:\s+/);
+            // Step 2: Split by region
+            const regionBlocks = cleanedFullText.split(/Scanning region:\s+/);
 
-    regionBlocks.forEach(block => {
-        if (!block.trim() || block.includes("Running on AWS Account")) return;
-        
-        const lines = block.split('\n');
-        const regionName = lines[0].trim();
+            regionBlocks.forEach(block => {
+                if (!block.trim() || block.includes("Running on AWS Account")) return;
 
-        // Step 3: Extract Instances into a Map for lookup
-        const instanceMap = new Map();
-        const instanceSection = block.split(/-------------------- EC2 INSTANCES --------------------/)[1];
-        if (instanceSection) {
-            const instJsonText = instanceSection.split(/--------------------/)[0].trim();
-            try {
-                const instData = JSON.parse(instJsonText);
-                instData.forEach(wrapper => {
-                    wrapper.Instances.forEach(inst => {
-                        instanceMap.set(inst.InstanceId, {
-                            type: inst.InstanceType,
-                            ami: inst.ImageId,
-                            os: inst.PlatformDetails
+                const lines = block.split('\n');
+                const regionName = lines[0].trim();
+
+                // Step 3: Extract Instances into a Map for lookup
+                const instanceMap = new Map();
+                const instanceSection = block.split(/-------------------- EC2 INSTANCES --------------------/)[1];
+                if (instanceSection) {
+                    const instJsonText = instanceSection.split(/--------------------/)[0].trim();
+                    try {
+                        const instData = JSON.parse(instJsonText);
+                        instData.forEach(wrapper => {
+                            wrapper.Instances.forEach(inst => {
+                                instanceMap.set(inst.InstanceId, {
+                                    type: inst.InstanceType,
+                                    ami: inst.ImageId,
+                                    os: inst.PlatformDetails,
+                                    rootDevice: inst.RootDevice
+                                });
+                            });
                         });
-                    });
-                });
-            } catch (e) { console.error("Instance JSON Parse Error", e); }
+                    } catch (e) { console.error("Instance JSON Parse Error", e); }
+                }
+
+                // Step 4: Extract and Parse Volumes
+                const ebsSection = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
+                if (ebsSection) {
+                    const volJsonText = ebsSection.split(/--------------------/)[0].trim();
+                    try {
+                        const volumes = JSON.parse(volJsonText);
+                        volumes.forEach(v => {
+                            const instMeta = instanceMap.get(v.InstanceId) || {
+                                type: v.State === 'available' ? 'Available' : 'None',
+                                ami: '-',
+                                os: '-',
+                                rootDevice: null // Ensure rootDevice is part of the lookup
+                            };
+                            // New more accurate boot detection:
+                            // 1. Checks if the volume has an attachment path (v.Device)
+                            // 2. Compares that path to the instance's official RootDevice field
+                            let isBoot = false;
+                            if (v.Device && instMeta.rootDevice && v.Device === instMeta.rootDevice) {
+                                isBoot = true;
+                            }
+                            // Logic for optimization and attributes
+                            let worth = (v.VolumeType === 'gp2') ? "Economical" : "Optimized";
+
+                            volumeData.push({
+                                acc: curAcc,
+                                region: regionName,
+                                id: v.VolumeId,
+                                path: v.Device || "-",
+                                state: v.State,
+                                diskType: v.VolumeType,
+                                size: parseInt(v.Size),
+                                instType: instMeta.type,
+                                instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
+                                ami: instMeta.ami,
+                                hv: getHypervisor(instMeta.type),
+                                os: instMeta.os,
+                                boot: isBoot ? "Yes" : "No", // Using the precise match
+                                iops: v.Iops || 0,
+                                tput: v.Throughput || 0,
+                                worthiness: worth
+                            });
+                        });
+                    } catch (e) { console.error("Volume JSON Parse Error", e); }
+                }
+            });
+
+            // Final UI Refresh
+            initHeaders();
+            populateDropdowns();
+            renderTable(volumeData);
+            document.getElementById('stats-panel').style.display = 'block';
+            document.getElementById('funnel-container').style.display = 'block';
         }
-
-        // Step 4: Extract and Parse Volumes
-        const ebsSection = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
-        if (ebsSection) {
-            const volJsonText = ebsSection.split(/--------------------/)[0].trim();
-            try {
-                const volumes = JSON.parse(volJsonText);
-                volumes.forEach(v => {
-                    const instMeta = instanceMap.get(v.InstanceId) || { 
-                        type: v.State === 'available' ? 'Available' : 'None', 
-                        ami: '-', 
-                        os: '-' 
-                    };
-
-                    // Logic for optimization and attributes
-                    let worth = (v.VolumeType === 'gp2') ? "Economical" : "Optimized";
-                    
-                    volumeData.push({
-                        acc: curAcc,
-                        region: regionName,
-                        id: v.VolumeId,
-                        path: v.Device || "-",
-                        state: v.State,
-                        diskType: v.VolumeType,
-                        size: parseInt(v.Size),
-                        instType: instMeta.type,
-                        instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
-                        ami: instMeta.ami,
-                        hv: getHypervisor(instMeta.type),
-                        os: instMeta.os,
-                        boot: (v.Device && (v.Device.includes('sda1') || v.Device.includes('xvda'))) ? "Yes" : "No",
-                        iops: v.Iops || 0,
-                        tput: v.Throughput || 0,
-                        worthiness: worth
-                    });
-                });
-            } catch (e) { console.error("Volume JSON Parse Error", e); }
-        }
-    });
-
-    // Final UI Refresh
-    initHeaders();
-    populateDropdowns();
-    renderTable(volumeData);
-    document.getElementById('stats-panel').style.display = 'block';
-    document.getElementById('funnel-container').style.display = 'block';
-}
 
         function initHeaders() {
             const headerRow = document.getElementById('headerRow');
