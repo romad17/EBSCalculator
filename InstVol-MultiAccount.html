@@ -372,10 +372,14 @@
                 </div>
             </div>
 
-            <div id="funnel-container" class="card" style="display:none; background: #020617; border-color: #334155; margin-bottom: 2rem;">
-                <h4 style="margin: 0 0 20px 0; font-size: 0.9rem; color: var(--df-accent-blue); text-align: center; text-transform: uppercase; letter-spacing: 0.05em;">Capacity Optimization Funnel</h4>
-                <div id="funnel-bars" style="display: flex; flex-direction: column; gap: 12px; max-width: 600px; margin: 0 auto; padding-right: 200px;">
-                    </div>
+            <div id="funnel-container" class="card"
+                style="display:none; background: #020617; border-color: #334155; margin-bottom: 2rem;">
+                <h4
+                    style="margin: 0 0 20px 0; font-size: 0.9rem; color: var(--df-accent-blue); text-align: center; text-transform: uppercase; letter-spacing: 0.05em;">
+                    Capacity Optimization Funnel</h4>
+                <div id="funnel-bars"
+                    style="display: flex; flex-direction: column; gap: 12px; max-width: 600px; margin: 0 auto; padding-right: 200px;">
+                </div>
             </div>
 
             <div style="overflow-x: auto;">
@@ -396,7 +400,7 @@
             { key: 'acc', label: 'Account' }, { key: 'region', label: 'Region' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
             { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
             { key: 'instType', label: 'Instance' }, { key: 'instSize', label: 'Class' },
-            { key: 'ami', label: 'AMI ID' }, 
+            { key: 'ami', label: 'AMI ID' },
             { key: 'hv', label: 'Hypervisor' },
             { key: 'os', label: 'OS' }, { key: 'boot', label: 'Boot' }, { key: 'iops', label: 'IOPS' }, { key: 'tput', label: 'Tput' },
             { key: 'worthiness', label: 'Autoscale Worthy' }
@@ -436,69 +440,84 @@
             reader.readAsText(file);
         });
 
-        function parseAndDisplay(rawText) {
-            const lines = rawText.split(/\r?\n/);
-            const instanceMap = new Map();
-            volumeData = [];
-            let curAcc = "Unknown Account", curRegion = "Unknown Region";
+function parseAndDisplay(rawText) {
+    volumeData = [];
+    const accountMatch = rawText.match(/Account ID: (\d+)/);
+    const curAcc = accountMatch ? accountMatch[1] : "767804179809";
 
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                if (trimmed.includes('Processing account ID:') || trimmed.startsWith('ACCOUNT:')) {
-                    curAcc = trimmed.split(':')[1].trim();
-                } else if (trimmed.includes('region:')) {
-                    curRegion = trimmed.split(':')[1].trim();
-                }
-                if ((trimmed.includes('x86_64') || trimmed.includes('arm64')) && trimmed.includes('i-')) {
-                    const parts = line.includes('\t') ? line.split('\t').map(item => item.trim()) : line.trim().split(/\s+/);
-                    if (parts.length >= 5) {
-                        const instId = parts[3], instType = parts[4];
-                        instanceMap.set(instId, {
-                            acc: curAcc, region: curRegion, type: instType,
-                            sizeSuffix: instType.includes('.') ? instType.split('.').pop() : "-",
-                            hv: getHypervisor(instType), ami: parts[2] || "-", os: parts[6] || "-", root: parts[7] || "-"
-                        });
-                    }
-                }
+    // Split by region to ensure correct data association
+    const regionBlocks = rawText.split(/Scanning region: /);
+
+    regionBlocks.forEach(block => {
+        if (!block.trim()) return;
+        const regionName = block.split('\n')[0].trim();
+
+        // 1. Extract Instances into a Map
+        const instanceMap = new Map();
+        const instanceRegex = /{[^}]*"InstanceId":\s*"(i-[a-z0-9]+)"[\s\S]*?"InstanceType":\s*"([^"]+)"[\s\S]*?"ImageId":\s*"([^"]+)"[\s\S]*?"PlatformDetails":\s*"([^"]+)"/g;
+        
+        let instMatch;
+        while ((instMatch = instanceRegex.exec(block)) !== null) {
+            instanceMap.set(instMatch[1], {
+                type: instMatch[2],
+                ami: instMatch[3],
+                os: instMatch[4]
             });
-
-            curAcc = "Unknown Account"; curRegion = "Unknown Region";
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                if (trimmed.includes('Processing account ID:') || trimmed.startsWith('ACCOUNT:')) curAcc = trimmed.split(':')[1].trim();
-                else if (trimmed.startsWith('Scanning region:')) curRegion = trimmed.split(':')[1].trim();
-
-                if (trimmed.includes('vol-') && !trimmed.includes('x86_64') && !trimmed.includes('arm64')) {
-                    const p = line.includes('\t') ? line.split('\t').map(item => item.trim()) : line.trim().split(/\s+/);
-                    if (p.length >= 7) {
-                        const volId = p[6], instId = p[1], meta = instanceMap.get(instId);
-                        const originalSize = parseInt(p[3]) || 0, dType = p[7] || "gp3";
-                        const iopsVal = (p[2] === "None" || p[2] === "0") ? 0 : parseInt(p[2]);
-                        const tputVal = (p[5] === "None" || p[5] === "0") ? 0 : parseInt(p[5]);
-
-                        let worth = "N/A";
-                        if (dType === 'gp2' || dType === 'gp3') {
-                            let s1 = 0.08 * originalSize + (iopsVal > 3000 ? (iopsVal-3000)*0.005 : 0) + (tputVal > 125 ? (tputVal-125)*0.04 : 0);
-                            let s2 = ((0.11 * originalSize / 3) * 1.2) + (iopsVal > 3000 ? 2*(iopsVal-3000)*0.005 : 0) + (tputVal > 125 ? 2*(tputVal-125)*0.04 : 0);
-                            worth = (s2 > s1) ? "Not Economical" : "Economical";
-                        }
-
-                        volumeData.push({
-                            acc: curAcc, region: meta ? meta.region : curRegion, id: volId, path: p[0] === 'None' ? "-" : p[0],
-                            state: p[4], diskType: dType, size: originalSize, instType: meta ? meta.type : (instId === 'None' ? "Available" : instId),
-                            instSize: meta ? meta.sizeSuffix : "-", ami: meta ? meta.ami : "-", hv: meta ? meta.hv : "-",
-                            os: meta ? meta.os : "-", boot: meta ? (p[0] === meta.root ? "Yes" : "No") : "No", iops: iopsVal, tput: tputVal, worthiness: worth
-                        });
-                    }
-                }
-            });
-
-            initHeaders();
-            populateDropdowns();
-            renderTable(volumeData);
-            document.getElementById('stats-panel').style.display = 'block';
-            document.getElementById('funnel-container').style.display = 'block';
         }
+
+        // 2. Extract Volumes
+        // This regex looks for VolumeId and captures related fields until the next VolumeId or end of block
+        const volRegex = /{[^}]*"VolumeId":\s*"(vol-[a-z0-9]+)"[\s\S]*?"Size":\s*(\d+)[\s\S]*?"VolumeType":\s*"([^"]+)"[\s\S]*?"State":\s*"([^"]+)"[\s\S]*?"Iops":\s*(\d+|null)[\s\S]*?"Throughput":\s*(\d+|null)[\s\S]*?"InstanceId":\s*"(i-[a-z0-9]+|null)"[\s\S]*?"Device":\s*"([^"]+|null)"/g;
+
+        let volMatch;
+        while ((volMatch = volRegex.exec(block)) !== null) {
+            const volId = volMatch[1];
+            const size = parseInt(volMatch[2]);
+            const type = volMatch[3];
+            const state = volMatch[4];
+            const iops = volMatch[5] === 'null' ? 0 : parseInt(volMatch[5]);
+            const tput = volMatch[6] === 'null' ? 0 : parseInt(volMatch[6]);
+            const instId = volMatch[7];
+            const device = volMatch[8] === 'null' ? "-" : volMatch[8];
+
+            const instMeta = instanceMap.get(instId) || { type: state === 'available' ? 'Available' : 'None', ami: '-', os: '-' };
+            
+            // Optimization Worthiness Logic
+            let worth = "N/A";
+            if (type === 'gp2') {
+                worth = "Economical"; // Upgrade to gp3 is usually cheaper
+            } else if (type === 'gp3') {
+                worth = "Optimized";
+            }
+
+            volumeData.push({
+                acc: curAcc,
+                region: regionName,
+                id: volId,
+                path: device,
+                state: state,
+                diskType: type,
+                size: size,
+                instType: instMeta.type,
+                instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
+                ami: instMeta.ami,
+                hv: getHypervisor(instMeta.type),
+                os: instMeta.os,
+                boot: device !== "-" && device.includes('sda1') ? "Yes" : "No", // Heuristic for root
+                iops: iops,
+                tput: tput,
+                worthiness: worth
+            });
+        }
+    });
+
+    // UI Updates
+    initHeaders();
+    populateDropdowns();
+    renderTable(volumeData);
+    document.getElementById('stats-panel').style.display = 'block';
+    document.getElementById('funnel-container').style.display = 'block';
+}
 
         function initHeaders() {
             const headerRow = document.getElementById('headerRow');
@@ -522,10 +541,10 @@
             });
         }
 
-function updateFunnel(filteredData) {
+        function updateFunnel(filteredData) {
             const funnelBars = document.getElementById('funnel-bars');
             funnelBars.innerHTML = '';
-            
+
             let currentData = [...volumeData];
             // The specific order requested for the capacity drain
             const steps = [
@@ -552,7 +571,7 @@ function updateFunnel(filteredData) {
                     // Apply cumulative filter based on current dropdown selections
                     const select = document.getElementById('filter-' + step.key);
                     const activeFilters = select ? Array.from(select.selectedOptions).map(o => o.value) : [];
-                    
+
                     if (activeFilters.length > 0) {
                         currentData = currentData.filter(v => activeFilters.includes(String(v[step.key])));
                     }
@@ -562,11 +581,11 @@ function updateFunnel(filteredData) {
                 const pct = totalBase > 0 ? (stepSize / totalBase) * 100 : 0;
                 const row = document.createElement('div');
                 row.className = 'funnel-step';
-                
+
                 // Visual tapering effect: width is based on remaining capacity percentage
-                row.style.width = `${Math.max(pct, 10)}%`; 
+                row.style.width = `${Math.max(pct, 10)}%`;
                 row.style.margin = "0 auto";
-                
+
                 row.innerHTML = `
                     <div class="funnel-bar-fill" style="width: 100%">
                         ${stepSize.toLocaleString()} GB
