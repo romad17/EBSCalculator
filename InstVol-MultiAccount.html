@@ -443,75 +443,79 @@
 function parseAndDisplay(rawText) {
     volumeData = [];
     const accountMatch = rawText.match(/Account ID: (\d+)/);
-    const curAcc = accountMatch ? accountMatch[1] : "767804179809";
+    const curAcc = accountMatch ? accountMatch[1] : "Unknown Account";
 
-    // Split by region to ensure correct data association
-    const regionBlocks = rawText.split(/Scanning region: /);
+    // Step 1: Clean the entire raw text of tags that break the JSON
+    const cleanedFullText = rawText.replace(/\//g, '');
+
+    // Step 2: Split by region
+    const regionBlocks = cleanedFullText.split(/Scanning region:\s+/);
 
     regionBlocks.forEach(block => {
-        if (!block.trim()) return;
-        const regionName = block.split('\n')[0].trim();
-
-        // 1. Extract Instances into a Map
-        const instanceMap = new Map();
-        const instanceRegex = /{[^}]*"InstanceId":\s*"(i-[a-z0-9]+)"[\s\S]*?"InstanceType":\s*"([^"]+)"[\s\S]*?"ImageId":\s*"([^"]+)"[\s\S]*?"PlatformDetails":\s*"([^"]+)"/g;
+        if (!block.trim() || block.includes("Running on AWS Account")) return;
         
-        let instMatch;
-        while ((instMatch = instanceRegex.exec(block)) !== null) {
-            instanceMap.set(instMatch[1], {
-                type: instMatch[2],
-                ami: instMatch[3],
-                os: instMatch[4]
-            });
+        const lines = block.split('\n');
+        const regionName = lines[0].trim();
+
+        // Step 3: Extract Instances into a Map for lookup
+        const instanceMap = new Map();
+        const instanceSection = block.split(/-------------------- EC2 INSTANCES --------------------/)[1];
+        if (instanceSection) {
+            const instJsonText = instanceSection.split(/--------------------/)[0].trim();
+            try {
+                const instData = JSON.parse(instJsonText);
+                instData.forEach(wrapper => {
+                    wrapper.Instances.forEach(inst => {
+                        instanceMap.set(inst.InstanceId, {
+                            type: inst.InstanceType,
+                            ami: inst.ImageId,
+                            os: inst.PlatformDetails
+                        });
+                    });
+                });
+            } catch (e) { console.error("Instance JSON Parse Error", e); }
         }
 
-        // 2. Extract Volumes
-        // This regex looks for VolumeId and captures related fields until the next VolumeId or end of block
-        const volRegex = /{[^}]*"VolumeId":\s*"(vol-[a-z0-9]+)"[\s\S]*?"Size":\s*(\d+)[\s\S]*?"VolumeType":\s*"([^"]+)"[\s\S]*?"State":\s*"([^"]+)"[\s\S]*?"Iops":\s*(\d+|null)[\s\S]*?"Throughput":\s*(\d+|null)[\s\S]*?"InstanceId":\s*"(i-[a-z0-9]+|null)"[\s\S]*?"Device":\s*"([^"]+|null)"/g;
+        // Step 4: Extract and Parse Volumes
+        const ebsSection = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
+        if (ebsSection) {
+            const volJsonText = ebsSection.split(/--------------------/)[0].trim();
+            try {
+                const volumes = JSON.parse(volJsonText);
+                volumes.forEach(v => {
+                    const instMeta = instanceMap.get(v.InstanceId) || { 
+                        type: v.State === 'available' ? 'Available' : 'None', 
+                        ami: '-', 
+                        os: '-' 
+                    };
 
-        let volMatch;
-        while ((volMatch = volRegex.exec(block)) !== null) {
-            const volId = volMatch[1];
-            const size = parseInt(volMatch[2]);
-            const type = volMatch[3];
-            const state = volMatch[4];
-            const iops = volMatch[5] === 'null' ? 0 : parseInt(volMatch[5]);
-            const tput = volMatch[6] === 'null' ? 0 : parseInt(volMatch[6]);
-            const instId = volMatch[7];
-            const device = volMatch[8] === 'null' ? "-" : volMatch[8];
-
-            const instMeta = instanceMap.get(instId) || { type: state === 'available' ? 'Available' : 'None', ami: '-', os: '-' };
-            
-            // Optimization Worthiness Logic
-            let worth = "N/A";
-            if (type === 'gp2') {
-                worth = "Economical"; // Upgrade to gp3 is usually cheaper
-            } else if (type === 'gp3') {
-                worth = "Optimized";
-            }
-
-            volumeData.push({
-                acc: curAcc,
-                region: regionName,
-                id: volId,
-                path: device,
-                state: state,
-                diskType: type,
-                size: size,
-                instType: instMeta.type,
-                instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
-                ami: instMeta.ami,
-                hv: getHypervisor(instMeta.type),
-                os: instMeta.os,
-                boot: device !== "-" && device.includes('sda1') ? "Yes" : "No", // Heuristic for root
-                iops: iops,
-                tput: tput,
-                worthiness: worth
-            });
+                    // Logic for optimization and attributes
+                    let worth = (v.VolumeType === 'gp2') ? "Economical" : "Optimized";
+                    
+                    volumeData.push({
+                        acc: curAcc,
+                        region: regionName,
+                        id: v.VolumeId,
+                        path: v.Device || "-",
+                        state: v.State,
+                        diskType: v.VolumeType,
+                        size: parseInt(v.Size),
+                        instType: instMeta.type,
+                        instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
+                        ami: instMeta.ami,
+                        hv: getHypervisor(instMeta.type),
+                        os: instMeta.os,
+                        boot: (v.Device && (v.Device.includes('sda1') || v.Device.includes('xvda'))) ? "Yes" : "No",
+                        iops: v.Iops || 0,
+                        tput: v.Throughput || 0,
+                        worthiness: worth
+                    });
+                });
+            } catch (e) { console.error("Volume JSON Parse Error", e); }
         }
     });
 
-    // UI Updates
+    // Final UI Refresh
     initHeaders();
     populateDropdowns();
     renderTable(volumeData);
