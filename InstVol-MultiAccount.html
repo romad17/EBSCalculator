@@ -456,6 +456,90 @@
             return "Unknown";
         }
 
+        const ebsPricing = {
+            // Default pricing, based on us-east-1
+            'default': {
+                gp2: { storage: 0.10 },
+                gp3: { storage: 0.08, iops: 0.005, throughput: 0.04 }
+            },
+            'us-east-1': { // N. Virginia
+                gp2: { storage: 0.10 },
+                gp3: { storage: 0.08, iops: 0.005, throughput: 0.04 }
+            },
+            'us-east-2': { // Ohio
+                gp2: { storage: 0.10 },
+                gp3: { storage: 0.08, iops: 0.005, throughput: 0.04 }
+            },
+            'us-west-1': { // N. California
+                gp2: { storage: 0.12 },
+                gp3: { storage: 0.096, iops: 0.006, throughput: 0.048 }
+            },
+            'us-west-2': { // Oregon
+                gp2: { storage: 0.10 },
+                gp3: { storage: 0.08, iops: 0.005, throughput: 0.04 }
+            },
+            'eu-west-1': { // Ireland
+                gp2: { storage: 0.119 },
+                gp3: { storage: 0.092, iops: 0.0055, throughput: 0.044 }
+            },
+            'ap-northeast-1': { // Tokyo
+                gp2: { storage: 0.12 },
+                gp3: { storage: 0.096, iops: 0.006, throughput: 0.048 }
+            },
+            'sa-east-1': { // Sao Paulo
+                gp2: { storage: 0.187 },
+                gp3: { storage: 0.136, iops: 0.0085, throughput: 0.068 }
+            },
+            'af-south-1': { // Cape Town
+                gp2: { storage: 0.138 },
+                gp3: { storage: 0.106, iops: 0.0065, throughput: 0.052 }
+            },
+            'ap-east-1': { // Hong Kong
+                gp2: { storage: 0.138 },
+                gp3: { storage: 0.11, iops: 0.0065, throughput: 0.052 }
+            },
+            'ap-south-1': { // Mumbai
+                gp2: { storage: 0.113 },
+                gp3: { storage: 0.09, iops: 0.0056, throughput: 0.045 }
+            },
+            'ap-northeast-2': { // Seoul
+                gp2: { storage: 0.121 },
+                gp3: { storage: 0.097, iops: 0.006, throughput: 0.048 }
+            },
+            'ap-southeast-1': { // Singapore
+                gp2: { storage: 0.12 },
+                gp3: { storage: 0.096, iops: 0.006, throughput: 0.048 }
+            },
+            'ap-southeast-2': { // Sydney
+                gp2: { storage: 0.132 },
+                gp3: { storage: 0.106, iops: 0.0065, throughput: 0.052 }
+            },
+            'ca-central-1': { // Canada (Central)
+                gp2: { storage: 0.11 },
+                gp3: { storage: 0.088, iops: 0.0055, throughput: 0.044 }
+            },
+            'eu-central-1': { // Frankfurt
+                gp2: { storage: 0.119 },
+                gp3: { storage: 0.092, iops: 0.0055, throughput: 0.044 }
+            },
+            'eu-west-2': { // London
+                gp2: { storage: 0.11 },
+                gp3: { storage: 0.088, iops: 0.0055, throughput: 0.044 }
+            },
+            'eu-west-3': { // Paris
+                gp2: { storage: 0.121 },
+                gp3: { storage: 0.097, iops: 0.006, throughput: 0.048 }
+            },
+            'eu-north-1': { // Stockholm
+                gp2: { storage: 0.108 },
+                gp3: { storage: 0.086, iops: 0.0054, throughput: 0.043 }
+            },
+            'me-south-1': { // Bahrain
+                gp2: { storage: 0.121 },
+                gp3: { storage: 0.097, iops: 0.006, throughput: 0.048 }
+            }
+        };
+
         document.getElementById('fileInput').addEventListener('change', function (e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -528,9 +612,18 @@
                             // Logic for optimization and attributes
                             let worth = "N/A";
                             if (dType === 'gp2' || dType === 'gp3') {
-                                let s1 = 0.08 * originalSize + (iopsVal > 3000 ? (iopsVal - 3000) * 0.005 : 0) + (tputVal > 125 ? (tputVal - 125) * 0.04 : 0);
-                                let s2 = ((0.11 * originalSize / 3) * 1.2) + (iopsVal > 3000 ? 2 * (iopsVal - 3000) * 0.005 : 0) + (tputVal > 125 ? 2 * (tputVal - 125) * 0.04 : 0);
-                                worth = (s2 > s1) ? "Not Economical" : "Economical";
+                                const prices = ebsPricing[regionName] || ebsPricing['default'];
+                                let original_cost = 0;
+                                if (dType === 'gp2') {
+                                    original_cost = prices.gp2.storage * originalSize;
+                                } else { // gp3
+                                    const gp3Prices = prices.gp3;
+                                    original_cost = gp3Prices.storage * originalSize +
+                                        (iopsVal > 3000 ? (iopsVal - 3000) * gp3Prices.iops : 0) +
+                                        (tputVal > 125 ? (tputVal - 125) * gp3Prices.throughput : 0);
+                                }
+                                let datafied_cost = (((prices.gp3.storage + 0.03) * originalSize / 3) * 1.2) + (iopsVal > 3000 ? 2 * (iopsVal - 3000) * prices.gp3.iops : 0) + (tputVal > 125 ? 2 * (tputVal - 125) * prices.gp3.throughput : 0);
+                                worth = (datafied_cost > original_cost) ? "Not Economical" : "Economical";
                             }
 
                             volumeData.push({
