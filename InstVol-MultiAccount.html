@@ -689,8 +689,145 @@ const instanceTputMap = {
             reader.readAsText(file);
         });
 
+        function parseOldFormat(rawText) {
+            const lines = rawText.split(/\r?\n/);
+            const instanceMap = new Map();
+            volumeData = [];
+            snapshotData = []; // Clear snapshot data for old format
+            let curAcc = "Unknown Account";
+
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.includes('Processing account ID:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                } else if (trimmed.startsWith('ACCOUNT:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                }
+
+                if ((trimmed.includes('x86_64') || trimmed.includes('arm64')) && trimmed.includes('i-')) {
+                    const parts = line.split('\t').map(item => item.trim());
+                    if (parts.length >= 5) {
+                        const instId = parts[3];
+                        const instType = parts[4];
+                        instanceMap.set(instId, {
+                            type: instType,
+                            os: parts[6] || "-",
+                            rootDevice: parts[7] || null,
+                            attachedVolumes: 0 // This will be counted in the next loop
+                        });
+                    }
+                }
+            });
+
+            curAcc = "Unknown Account"; 
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed.includes('Processing account ID:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                } else if (trimmed.startsWith('ACCOUNT:')) {
+                    curAcc = trimmed.split(':')[1].trim();
+                }
+
+                // Pre-count attached volumes for each instance
+                if (trimmed.includes('vol-') && !trimmed.includes('x86_64') && !trimmed.includes('arm64')) {
+                    const p = line.split('\t').map(item => item.trim());
+                    if (p.length >= 7 && p[1] !== 'None') {
+                        const instId = p[1];
+                        instanceMap.get(instId).attachedVolumes++;
+                    }
+                }
+                if (trimmed.includes('vol-') && !trimmed.includes('x86_64') && !trimmed.includes('arm64')) {
+                    const p = line.split('\t').map(item => item.trim());
+                    if (p.length >= 7) {
+                        const volId = p[6];
+                        const instId = p[1];
+                        const instMeta = instanceMap.get(instId) || { type: 'Available', os: '-', rootDevice: null, attachedVolumes: 0 };
+                        const originalSize = parseInt(p[3]) || 0;
+                        const dType = p[7] || "gp3";
+                        const iopsVal = (p[2] === "None" || p[2] === "0") ? 0 : parseInt(p[2]);
+                        const tputVal = (p[5] === "None" || p[5] === "0") ? 0 : parseInt(p[5]);
+
+                        // Simplified worthiness from old file for compatibility
+                        let worth = "N/A";
+                        if (dType === 'gp2' || dType === 'gp3') {
+                            let sideOne = 0.08 * originalSize;
+                            if (iopsVal > 3000) sideOne += (iopsVal - 3000) * 0.005;
+                            if (tputVal > 125) sideOne += (tputVal - 125) * 0.04;
+                            let sideTwo = (0.11 * originalSize / 3) * 1.2;
+                            if (iopsVal > 3000) sideTwo += 2 * (iopsVal - 3000) * 0.005;
+                            if (tputVal > 125) sideTwo += 2 * (tputVal - 125) * 0.04;
+                            worth = (sideTwo > sideOne) ? "Not Economical" : "Economical";
+                        }
+
+                        let overprovisionedStatus = "N/A";
+                        const instPerf = instanceSpecs[instMeta.type];
+                        if (instPerf) {
+                            const iopsOver = iopsVal > instPerf.iops;
+                            const tputOver = tputVal > instPerf.tput;
+                            if (iopsOver && tputOver) {
+                                overprovisionedStatus = "TPut and IOPS OP";
+                            } else if (iopsOver) {
+                                overprovisionedStatus = "IOPS OP";
+                            } else if (tputOver) {
+                                overprovisionedStatus = "TPut OP";
+                            } else {
+                                overprovisionedStatus = "Normal";
+                            }
+                        }
+
+                        let freeSlots = "N/A";
+                        const ebsLimit = instanceEbsLimits[instMeta.type];
+                        if (ebsLimit) {
+                            // attachedVolumes is now correctly counted on the instance meta object
+                            freeSlots = ebsLimit - instMeta.attachedVolumes;
+                        }
+
+
+                        volumeData.push({
+                            acc: curAcc,
+                            region: 'N/A', // Old format is not region-aware
+                            id: volId,
+                            path: p[0] === 'None' ? "-" : p[0],
+                            state: p[4],
+                            diskType: dType,
+                            size: originalSize,
+                            instType: instMeta ? instMeta.type : (instId === 'None' ? "Available" : instId),
+                            instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
+                            ami: 'N/A',
+                            hv: getHypervisor(instMeta.type),
+                            os: instMeta ? instMeta.os : "-",
+                            boot: instMeta && instMeta.rootDevice ? (p[0] === instMeta.rootDevice ? "Yes" : "No") : "No",
+                            iops: iopsVal,
+                            tput: tputVal,
+                            worthiness: worth,
+                            overprovisioned: overprovisionedStatus,
+                            freeSlots: freeSlots
+                        });
+                    }
+                }
+            });
+        }
+
         function parseAndDisplay(rawText) {
             volumeData = [];
+            snapshotData = [];
+
+            // Detect format and delegate
+            if (!rawText.includes('-------------------- EC2 INSTANCES --------------------')) {
+                parseOldFormat(rawText);
+            } else {
+                parseNewFormat(rawText);
+            }
+
+            // Final UI Refresh
+            initHeaders();
+            populateDropdowns();
+            renderTable(volumeData);
+            document.getElementById('stats-panel').style.display = 'block';
+            document.getElementById('funnel-container').style.display = 'block';
+        }
+
+        function parseNewFormat(rawText) {
             const accountMatch = rawText.match(/Account ID: (\d+)/);
             const curAcc = accountMatch ? accountMatch[1] : "Unknown Account";
 
@@ -841,13 +978,6 @@ const instanceTputMap = {
                     } catch (e) { console.error("Snapshot JSON Parse Error", e); }
                 }
             });
-
-            // Final UI Refresh
-            initHeaders();
-            populateDropdowns();
-            renderTable(volumeData);
-            document.getElementById('stats-panel').style.display = 'block';
-            document.getElementById('funnel-container').style.display = 'block';
         }
 
         function initHeaders() {
