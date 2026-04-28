@@ -913,9 +913,11 @@ const instanceTputMap = {
                     const attachedVolumeCounts = new Map();
                     const ebsSectionForCount = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
                     if(ebsSectionForCount) {
-                        JSON.parse(ebsSectionForCount.split(/--------------------/)[0].trim()).forEach(v => {
-                            if(v.InstanceId) attachedVolumeCounts.set(v.InstanceId, (attachedVolumeCounts.get(v.InstanceId) || 0) + 1);
-                        });
+                        try {
+                            JSON.parse(ebsSectionForCount.split(/--------------------/)[0].trim()).forEach(v => {
+                                if(v.InstanceId) attachedVolumeCounts.set(v.InstanceId, (attachedVolumeCounts.get(v.InstanceId) || 0) + 1);
+                            });
+                        } catch (e) { console.error("EBS volume count pre-parse error", e); }
                     }
 
                     try {
