@@ -342,6 +342,7 @@
             <div id="stats-panel" style="display:none;">
                 <div class="stats-header">
                     <span id="vol-count"></span>
+                    <span id="acc-count" style="color: var(--df-text-light)"></span>
                     <span id="size-sum" style="color: var(--df-accent-blue)"></span>
                 </div>
 
@@ -353,6 +354,8 @@
                             <tr>
                                 <th>AWS Account ID</th>
                                 <th style="text-align: center;">Volumes</th>
+                                <th style="text-align: center;">DLM Policies</th>
+                                <th style="text-align: center;">AWS Backup Plans</th>
                                 <th style="text-align: right;">Total Size (GB)</th>
                             </tr>
                         </thead>
@@ -392,6 +395,39 @@
                         <tbody id="snapshot-summary-body"></tbody>
                     </table>
                 </div>
+
+                <div>
+                    <h4 style="margin: 20px 0 8px 0; font-size: 0.85rem; color: var(--df-accent-blue);">DLM Policies</h4>
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left;">Account</th>
+                                <th style="text-align: left;">Region</th>
+                                <th style="text-align: left;">Policy ID</th>
+                                <th style="text-align: left;">Name / Description</th>
+                                <th style="text-align: left;">Type</th>
+                                <th style="text-align: left;">State</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dlm-summary-body"></tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <h4 style="margin: 20px 0 8px 0; font-size: 0.85rem; color: var(--df-accent-blue);">AWS Backup Plans</h4>
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left;">Account</th>
+                                <th style="text-align: left;">Region</th>
+                                <th style="text-align: left;">Plan Name</th>
+                                <th style="text-align: left;">Plan ID</th>
+                                <th style="text-align: left;">Last Execution</th>
+                            </tr>
+                        </thead>
+                        <tbody id="backup-summary-body"></tbody>
+                    </table>
+                </div>
             </div>
 
             <div id="funnel-container" class="card"
@@ -420,6 +456,8 @@
     <script>
         let volumeData = [];
         let snapshotData = [];
+        let dlmData = [];
+        let backupData = [];
         const colConfig = [
             { key: 'acc', label: 'Account' }, { key: 'region', label: 'Region' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
             { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
@@ -693,7 +731,9 @@ const instanceTputMap = {
             const lines = rawText.split(/\r?\n/);
             const instanceMap = new Map();
             volumeData = [];
-            snapshotData = []; // Clear snapshot data for old format
+            snapshotData = [];
+            dlmData = [];
+            backupData = [];
             let curAcc = "Unknown Account";
 
             lines.forEach(line => {
@@ -811,6 +851,8 @@ const instanceTputMap = {
         function parseAndDisplay(rawText) {
             volumeData = [];
             snapshotData = [];
+            dlmData = [];
+            backupData = [];
 
             // Detect format and delegate
             if (!rawText.includes('-------------------- EC2 INSTANCES --------------------')) {
@@ -828,16 +870,28 @@ const instanceTputMap = {
         }
 
         function parseNewFormat(rawText) {
-            const accountMatch = rawText.match(/Account ID: (\d+)/);
-            const curAcc = accountMatch ? accountMatch[1] : "Unknown Account";
-
             // Step 1: escape "/" to prevent regex issues in JSON parsing (if any paths contain them)
             const cleanedFullText = rawText.replace(/\//g, '\\/');
 
-            // Step 2: Split by region
-            const regionBlocks = cleanedFullText.split(/Scanning region:\s+/);
+            // Step 2: Split by region, handling both formats:
+            //   New multi-account: "  - Scanning account 103962928438, region: us-east-1"
+            //   Old single-account: "Scanning region: us-east-1"
+            let regionBlocks, blockAccounts;
+            if (rawText.includes('  - Scanning account ')) {
+                // split() with a capture group interleaves captured values between elements:
+                // [preamble, acc1, block1, acc2, block2, ...]
+                const parts = cleanedFullText.split(/  - Scanning account (\d+), region:\s+/);
+                blockAccounts = parts.filter((_, i) => i > 0 && i % 2 === 1);
+                regionBlocks  = parts.filter((_, i) => i > 0 && i % 2 === 0);
+            } else {
+                const accountMatch = rawText.match(/Account ID: (\d+)/);
+                const singleAcc = accountMatch ? accountMatch[1] : "Unknown Account";
+                regionBlocks  = cleanedFullText.split(/Scanning region:\s+/);
+                blockAccounts = regionBlocks.map(() => singleAcc);
+            }
 
-            regionBlocks.forEach(block => {
+            regionBlocks.forEach((block, blockIdx) => {
+                const curAcc = blockAccounts[blockIdx] || "Unknown Account";
                 if (!block.trim() || block.includes("Running on AWS Account")) return;
 
                 const lines = block.split('\n');
@@ -865,7 +919,7 @@ const instanceTputMap = {
                                 instanceMap.set(inst.InstanceId, {
                                     type: inst.InstanceType,
                                     ami: inst.ImageId,
-                                    os: inst.PlatformDetails || inst.Platform || '-',
+                                    os: inst.OS || inst.PlatformDetails || inst.Platform || '-',
                                     rootDevice: inst.RootDeviceName || inst.RootDevice || null,
                                     attachedVolumes: attachedVolumeCounts.get(inst.InstanceId) || 0
                                 });
@@ -977,6 +1031,41 @@ const instanceTputMap = {
                         });
                     } catch (e) { console.error("Snapshot JSON Parse Error", e); }
                 }
+
+                // Step 6: Extract and Parse DLM Policies
+                const dlmSection = block.split(/-------------------- DLM POLICIES ----------------------/)[1];
+                if (dlmSection) {
+                    const dlmJsonText = dlmSection.split(/--------------------/)[0].trim();
+                    try {
+                        (JSON.parse(dlmJsonText).Policies || []).forEach(p => {
+                            dlmData.push({
+                                acc: curAcc,
+                                region: regionName,
+                                id: p.PolicyId,
+                                name: (p.Tags && p.Tags.Name) || p.Description || '-',
+                                type: p.PolicyType || '-',
+                                state: p.State || '-'
+                            });
+                        });
+                    } catch (e) { console.error("DLM JSON Parse Error", e); }
+                }
+
+                // Step 7: Extract and Parse AWS Backup Plans
+                const backupSection = block.split(/-------------------- BACKUP PLANS ----------------------/)[1];
+                if (backupSection) {
+                    const backupJsonText = backupSection.split(/--------------------/)[0].trim();
+                    try {
+                        (JSON.parse(backupJsonText).BackupPlansList || []).forEach(p => {
+                            backupData.push({
+                                acc: curAcc,
+                                region: regionName,
+                                name: p.BackupPlanName || '-',
+                                id: p.BackupPlanId || '-',
+                                lastRun: p.LastExecutionDate ? p.LastExecutionDate.slice(0, 10) : '-'
+                            });
+                        });
+                    } catch (e) { console.error("Backup JSON Parse Error", e); }
+                }
             });
         }
 
@@ -1064,6 +1153,10 @@ const instanceTputMap = {
             const tputSummaryBody = document.getElementById('tput-summary-body'); tputSummaryBody.innerHTML = '';
             const snapSummaryBody = document.getElementById('snapshot-summary-body');
             snapSummaryBody.innerHTML = '';
+            const dlmSummaryBody = document.getElementById('dlm-summary-body');
+            dlmSummaryBody.innerHTML = '';
+            const backupSummaryBody = document.getElementById('backup-summary-body');
+            backupSummaryBody.innerHTML = '';
 
             let totalSize = 0, accStatsMap = {}, tputStatsMap = {}, snapStatsMap = {};
 
@@ -1117,8 +1210,41 @@ const instanceTputMap = {
             <td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
             });
 
+            dlmData.forEach(p => {
+                const stateColor = p.state === 'ENABLED' ? 'var(--df-success)' : 'var(--df-danger)';
+                const typeLabel = p.type === 'EBS_SNAPSHOT_MANAGEMENT' ? 'EBS Snapshot' : p.type === 'IMAGE_MANAGEMENT' ? 'AMI' : p.type;
+                dlmSummaryBody.insertRow().innerHTML = `
+                    <td style="color:#94a3b8">${p.acc}</td>
+                    <td>${p.region}</td>
+                    <td style="font-family:monospace; font-size:11px; color:#60a5fa">${p.id}</td>
+                    <td>${p.name}</td>
+                    <td><span style="font-size:11px; color:var(--df-text-light)">${typeLabel}</span></td>
+                    <td style="color:${stateColor}; font-weight:600">${p.state}</td>`;
+            });
+
+            backupData.forEach(p => {
+                backupSummaryBody.insertRow().innerHTML = `
+                    <td style="color:#94a3b8">${p.acc}</td>
+                    <td>${p.region}</td>
+                    <td style="font-weight:600; color:#fff">${p.name}</td>
+                    <td style="font-family:monospace; font-size:11px; color:#60a5fa">${p.id}</td>
+                    <td style="color:var(--df-text-light)">${p.lastRun}</td>`;
+            });
+
+            const dlmCountByAcc = {};
+            dlmData.forEach(p => { dlmCountByAcc[p.acc] = (dlmCountByAcc[p.acc] || 0) + 1; });
+            const backupCountByAcc = {};
+            backupData.forEach(p => { backupCountByAcc[p.acc] = (backupCountByAcc[p.acc] || 0) + 1; });
+
             Object.entries(accStatsMap).sort((a, b) => b[1].size - a[1].size).forEach(([acc, stat]) => {
-                summaryBody.insertRow().innerHTML = `<td>${acc}</td><td style="text-align: center;">${stat.count}</td><td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
+                const dlmCount = dlmCountByAcc[acc] || 0;
+                const backupCount = backupCountByAcc[acc] || 0;
+                summaryBody.insertRow().innerHTML = `
+                    <td>${acc}</td>
+                    <td style="text-align: center;">${stat.count}</td>
+                    <td style="text-align: center;">${dlmCount > 0 ? `<b style="color:var(--df-success)">${dlmCount}</b>` : '<span style="color:var(--df-text-light)">—</span>'}</td>
+                    <td style="text-align: center;">${backupCount > 0 ? `<b style="color:var(--df-success)">${backupCount}</b>` : '<span style="color:var(--df-text-light)">—</span>'}</td>
+                    <td style="text-align: right;"><b style="color:var(--df-accent-blue)">${stat.size.toLocaleString()} GB</b></td>`;
             });
 
             Object.values(tputStatsMap).sort((a, b) => b.tput - a.tput || b.iops - a.iops).forEach(stat => {
@@ -1127,6 +1253,7 @@ const instanceTputMap = {
 
             document.getElementById('resultsTable').style.display = 'table';
             document.getElementById('vol-count').innerText = `${data.length} Volumes Filtered`;
+            document.getElementById('acc-count').innerText = `across ${Object.keys(accStatsMap).length} Accounts`;
             document.getElementById('size-sum').innerText = `TOTAL CAPACITY: ${totalSize.toLocaleString()} GB`;
 
             colConfig.forEach(col => {
