@@ -458,6 +458,8 @@
         let snapshotData = [];
         let dlmData = [];
         let backupData = [];
+        let totalScannedAccounts = 0;
+        let totalFailedAccounts = 0;
         const colConfig = [
             { key: 'acc', label: 'Account' }, { key: 'region', label: 'Region' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
             { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
@@ -883,11 +885,15 @@ const instanceTputMap = {
                 const parts = cleanedFullText.split(/  - Scanning account (\d+), region:\s+/);
                 blockAccounts = parts.filter((_, i) => i > 0 && i % 2 === 1);
                 regionBlocks  = parts.filter((_, i) => i > 0 && i % 2 === 0);
+                totalScannedAccounts = new Set(blockAccounts).size;
+                totalFailedAccounts = (rawText.match(/Failed to assume role in account/g) || []).length;
             } else {
                 const accountMatch = rawText.match(/Account ID: (\d+)/);
                 const singleAcc = accountMatch ? accountMatch[1] : "Unknown Account";
                 regionBlocks  = cleanedFullText.split(/Scanning region:\s+/);
                 blockAccounts = regionBlocks.map(() => singleAcc);
+                totalScannedAccounts = singleAcc !== "Unknown Account" ? 1 : 0;
+                totalFailedAccounts = 0;
             }
 
             regionBlocks.forEach((block, blockIdx) => {
@@ -1253,7 +1259,12 @@ const instanceTputMap = {
 
             document.getElementById('resultsTable').style.display = 'table';
             document.getElementById('vol-count').innerText = `${data.length} Volumes Filtered`;
-            document.getElementById('acc-count').innerText = `across ${Object.keys(accStatsMap).length} Accounts`;
+            const accWithVols = Object.keys(accStatsMap).length;
+            const totalAll = totalScannedAccounts + totalFailedAccounts;
+            const scanSuffix = totalScannedAccounts > 0
+                ? ` (Total ${totalAll} accounts, ${totalScannedAccounts} scanned, ${totalFailedAccounts} failed to scan)`
+                : '';
+            document.getElementById('acc-count').innerText = `across ${accWithVols} Accounts${scanSuffix}`;
             document.getElementById('size-sum').innerText = `TOTAL CAPACITY: ${totalSize.toLocaleString()} GB`;
 
             colConfig.forEach(col => {
