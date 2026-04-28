@@ -871,6 +871,12 @@ const instanceTputMap = {
             document.getElementById('funnel-container').style.display = 'block';
         }
 
+        function safeParseJSON(text) {
+            const t = (text || '').trim();
+            if (!t.startsWith('[') && !t.startsWith('{')) return null;
+            try { return JSON.parse(t); } catch (e) { return null; }
+        }
+
         function parseNewFormat(rawText) {
             // Step 1: escape "/" to prevent regex issues in JSON parsing (if any paths contain them)
             const cleanedFullText = rawText.replace(/\//g, '\\/');
@@ -913,166 +919,144 @@ const instanceTputMap = {
                     const attachedVolumeCounts = new Map();
                     const ebsSectionForCount = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
                     if(ebsSectionForCount) {
-                        try {
-                            JSON.parse(ebsSectionForCount.split(/--------------------/)[0].trim()).forEach(v => {
-                                if(v.InstanceId) attachedVolumeCounts.set(v.InstanceId, (attachedVolumeCounts.get(v.InstanceId) || 0) + 1);
-                            });
-                        } catch (e) { console.error("EBS volume count pre-parse error", e); }
+                        (safeParseJSON(ebsSectionForCount.split(/--------------------/)[0]) || []).forEach(v => {
+                            if(v.InstanceId) attachedVolumeCounts.set(v.InstanceId, (attachedVolumeCounts.get(v.InstanceId) || 0) + 1);
+                        });
                     }
 
-                    try {
-                        const instData = JSON.parse(instJsonText);
-                        instData.forEach(wrapper => {
-                            wrapper.Instances.forEach(inst => {
-                                instanceMap.set(inst.InstanceId, {
-                                    type: inst.InstanceType,
-                                    ami: inst.ImageId,
-                                    os: inst.OS || inst.PlatformDetails || inst.Platform || '-',
-                                    rootDevice: inst.RootDeviceName || inst.RootDevice || null,
-                                    attachedVolumes: attachedVolumeCounts.get(inst.InstanceId) || 0
-                                });
+                    (safeParseJSON(instJsonText) || []).forEach(wrapper => {
+                        wrapper.Instances.forEach(inst => {
+                            instanceMap.set(inst.InstanceId, {
+                                type: inst.InstanceType,
+                                ami: inst.ImageId,
+                                os: inst.OS || inst.PlatformDetails || inst.Platform || '-',
+                                rootDevice: inst.RootDeviceName || inst.RootDevice || null,
+                                attachedVolumes: attachedVolumeCounts.get(inst.InstanceId) || 0
                             });
                         });
-                    } catch (e) { console.error("Instance JSON Parse Error", e); }
+                    });
                 }
 
                 // Step 4: Extract and Parse Volumes
                 const ebsSection = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
                 if (ebsSection) {
                     const volJsonText = ebsSection.split(/--------------------/)[0].trim();
-                    try {
-                        const volumes = JSON.parse(volJsonText);
-                        volumes.forEach(v => {
-                            const originalSize = parseInt(v.Size) || 0;
-                            const dType = v.VolumeType || 'UnKnown';
-                            const iopsVal = parseInt(v.Iops) || 0;
-                            const tputVal = parseInt(v.Throughput) || 0;
-                            const instMeta = instanceMap.get(v.InstanceId) || {
-                                type: v.State === 'available' ? 'Available' : 'None',
-                                ami: '-',
-                                os: '-',
-                                rootDevice: null,
-                                attachedVolumes: 0
-                            };
-                            // New more accurate boot detection:
-                            // 1. Checks if the volume has an attachment path (v.Device)
-                            // 2. Compares that path to the instance's official RootDevice field
-                            let isBoot = false;
-                            if (v.Device && instMeta.rootDevice && v.Device === instMeta.rootDevice) {
-                                isBoot = true;
+                    (safeParseJSON(volJsonText) || []).forEach(v => {
+                        const originalSize = parseInt(v.Size) || 0;
+                        const dType = v.VolumeType || 'UnKnown';
+                        const iopsVal = parseInt(v.Iops) || 0;
+                        const tputVal = parseInt(v.Throughput) || 0;
+                        const instMeta = instanceMap.get(v.InstanceId) || {
+                            type: v.State === 'available' ? 'Available' : 'None',
+                            ami: '-',
+                            os: '-',
+                            rootDevice: null,
+                            attachedVolumes: 0
+                        };
+                        let isBoot = false;
+                        if (v.Device && instMeta.rootDevice && v.Device === instMeta.rootDevice) {
+                            isBoot = true;
+                        }
+                        let worth = "N/A";
+                        if (dType === 'gp2' || dType === 'gp3') {
+                            const prices = ebsPricing[regionName] || ebsPricing['default'];
+                            let original_cost = 0;
+                            if (dType === 'gp2') {
+                                original_cost = prices.gp2.storage * originalSize;
+                            } else {
+                                const gp3Prices = prices.gp3;
+                                original_cost = gp3Prices.storage * originalSize +
+                                    (iopsVal > 3000 ? (iopsVal - 3000) * gp3Prices.iops : 0) +
+                                    (tputVal > 125 ? (tputVal - 125) * gp3Prices.throughput : 0);
                             }
-                            // Logic for optimization and attributes
-                            let worth = "N/A";
-                            if (dType === 'gp2' || dType === 'gp3') {
-                                const prices = ebsPricing[regionName] || ebsPricing['default'];
-                                let original_cost = 0;
-                                if (dType === 'gp2') {
-                                    original_cost = prices.gp2.storage * originalSize;
-                                } else { // gp3
-                                    const gp3Prices = prices.gp3;
-                                    original_cost = gp3Prices.storage * originalSize +
-                                        (iopsVal > 3000 ? (iopsVal - 3000) * gp3Prices.iops : 0) +
-                                        (tputVal > 125 ? (tputVal - 125) * gp3Prices.throughput : 0);
-                                }
-                                let datafied_cost = (((prices.gp3.storage + 0.03) * originalSize / 3) * 1.2) + (iopsVal > 3000 ? 2 * (iopsVal - 3000) * prices.gp3.iops : 0) + (tputVal > 125 ? 2 * (tputVal - 125) * prices.gp3.throughput : 0);
-                                worth = (datafied_cost > original_cost) ? "Not Economical" : "Economical";
+                            const datafied_cost = (((prices.gp3.storage + 0.03) * originalSize / 3) * 1.2) + (iopsVal > 3000 ? 2 * (iopsVal - 3000) * prices.gp3.iops : 0) + (tputVal > 125 ? 2 * (tputVal - 125) * prices.gp3.throughput : 0);
+                            worth = (datafied_cost > original_cost) ? "Not Economical" : "Economical";
+                        }
+                        let overprovisionedStatus = "N/A";
+                        const instPerf = instanceSpecs[instMeta.type];
+                        if (instPerf) {
+                            const iopsOver = v.Iops > instPerf.iops;
+                            const tputOver = v.Throughput > instPerf.tput;
+                            if (iopsOver && tputOver) {
+                                overprovisionedStatus = "TPut and IOPS OP";
+                            } else if (iopsOver) {
+                                overprovisionedStatus = "IOPS OP";
+                            } else if (tputOver) {
+                                overprovisionedStatus = "TPut OP";
+                            } else {
+                                overprovisionedStatus = "Normal";
                             }
-
-                            let overprovisionedStatus = "N/A";
-                            const instPerf = instanceSpecs[instMeta.type];
-                            if (instPerf) {
-                                const iopsOver = v.Iops > instPerf.iops;
-                                const tputOver = v.Throughput > instPerf.tput;
-                                if (iopsOver && tputOver) {
-                                    overprovisionedStatus = "TPut and IOPS OP";
-                                } else if (iopsOver) {
-                                    overprovisionedStatus = "IOPS OP";
-                                } else if (tputOver) {
-                                    overprovisionedStatus = "TPut OP";
-                                } else {
-                                    overprovisionedStatus = "Normal";
-                                }
-                            }
-
-                            let freeSlots = "N/A";
-                            const ebsLimit = instanceEbsLimits[instMeta.type];
-                            if (ebsLimit) {
-                                freeSlots = ebsLimit - instMeta.attachedVolumes;
-                            }
-
-                            volumeData.push({
-                                acc: curAcc,
-                                region: regionName,
-                                id: v.VolumeId,
-                                path: v.Device || "-",
-                                state: v.State,
-                                diskType: v.VolumeType,
-                                size: originalSize,
-                                instType: instMeta.type,
-                                instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
-                                ami: instMeta.ami,
-                                hv: getHypervisor(instMeta.type),
-                                os: instMeta.os,
-                                boot: isBoot ? "Yes" : "No", // Using the precise match
-                                iops: v.Iops || 0,
-                                tput: v.Throughput || 0,
-                                worthiness: worth,
-                                overprovisioned: overprovisionedStatus,
-                                freeSlots: freeSlots
-                            });
+                        }
+                        let freeSlots = "N/A";
+                        const ebsLimit = instanceEbsLimits[instMeta.type];
+                        if (ebsLimit) {
+                            freeSlots = ebsLimit - instMeta.attachedVolumes;
+                        }
+                        volumeData.push({
+                            acc: curAcc,
+                            region: regionName,
+                            id: v.VolumeId,
+                            path: v.Device || "-",
+                            state: v.State,
+                            diskType: v.VolumeType,
+                            size: originalSize,
+                            instType: instMeta.type,
+                            instSize: instMeta.type.includes('.') ? instMeta.type.split('.').pop() : "-",
+                            ami: instMeta.ami,
+                            hv: getHypervisor(instMeta.type),
+                            os: instMeta.os,
+                            boot: isBoot ? "Yes" : "No",
+                            iops: v.Iops || 0,
+                            tput: v.Throughput || 0,
+                            worthiness: worth,
+                            overprovisioned: overprovisionedStatus,
+                            freeSlots: freeSlots
                         });
-                    } catch (e) { console.error("Volume JSON Parse Error", e); }
+                    });
                 }
 
                 // Step 5: Extract and Parse Snapshots
                 const snapSection = block.split(/-------------------- SNAPSHOTS -------------------------/)[1];
                 if (snapSection) {
                     const snapJsonText = snapSection.split(/--------------------/)[0].trim();
-                    try {
-                        const snapshots = JSON.parse(snapJsonText).Snapshots;
-                        snapshots.forEach(s => {
-                            snapshotData.push({
-                                region: regionName,
-                                size: s.VolumeSize || 0,
-                                tier: s.StorageTier || 'standard'
-                            });
+                    ((safeParseJSON(snapJsonText) || {}).Snapshots || []).forEach(s => {
+                        snapshotData.push({
+                            region: regionName,
+                            size: s.VolumeSize || 0,
+                            tier: s.StorageTier || 'standard'
                         });
-                    } catch (e) { console.error("Snapshot JSON Parse Error", e); }
+                    });
                 }
 
                 // Step 6: Extract and Parse DLM Policies
                 const dlmSection = block.split(/-------------------- DLM POLICIES ----------------------/)[1];
                 if (dlmSection) {
                     const dlmJsonText = dlmSection.split(/--------------------/)[0].trim();
-                    try {
-                        (JSON.parse(dlmJsonText).Policies || []).forEach(p => {
-                            dlmData.push({
-                                acc: curAcc,
-                                region: regionName,
-                                id: p.PolicyId,
-                                name: (p.Tags && p.Tags.Name) || p.Description || '-',
-                                type: p.PolicyType || '-',
-                                state: p.State || '-'
-                            });
+                    ((safeParseJSON(dlmJsonText) || {}).Policies || []).forEach(p => {
+                        dlmData.push({
+                            acc: curAcc,
+                            region: regionName,
+                            id: p.PolicyId,
+                            name: (p.Tags && p.Tags.Name) || p.Description || '-',
+                            type: p.PolicyType || '-',
+                            state: p.State || '-'
                         });
-                    } catch (e) { console.error("DLM JSON Parse Error", e); }
+                    });
                 }
 
                 // Step 7: Extract and Parse AWS Backup Plans
                 const backupSection = block.split(/-------------------- BACKUP PLANS ----------------------/)[1];
                 if (backupSection) {
                     const backupJsonText = backupSection.split(/--------------------/)[0].trim();
-                    try {
-                        (JSON.parse(backupJsonText).BackupPlansList || []).forEach(p => {
-                            backupData.push({
-                                acc: curAcc,
-                                region: regionName,
-                                name: p.BackupPlanName || '-',
-                                id: p.BackupPlanId || '-',
-                                lastRun: p.LastExecutionDate ? p.LastExecutionDate.slice(0, 10) : '-'
-                            });
+                    ((safeParseJSON(backupJsonText) || {}).BackupPlansList || []).forEach(p => {
+                        backupData.push({
+                            acc: curAcc,
+                            region: regionName,
+                            name: p.BackupPlanName || '-',
+                            id: p.BackupPlanId || '-',
+                            lastRun: p.LastExecutionDate ? p.LastExecutionDate.slice(0, 10) : '-'
                         });
-                    } catch (e) { console.error("Backup JSON Parse Error", e); }
+                    });
                 }
             });
         }
