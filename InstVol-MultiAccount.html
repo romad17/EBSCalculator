@@ -293,6 +293,11 @@
             color: #fecaca;
         }
 
+        .tag-br-local {
+            background: #134e4a;
+            color: #99f6e4;
+        }
+
         .state-active {
             color: #4ade80;
             font-weight: 700;
@@ -464,7 +469,7 @@
             { key: 'acc', label: 'Account' }, { key: 'region', label: 'Region' }, { key: 'id', label: 'Volume ID' }, { key: 'path', label: 'Path' },
             { key: 'state', label: 'State' }, { key: 'diskType', label: 'Type' }, { key: 'size', label: 'Size' },
             { key: 'instType', label: 'Instance' }, { key: 'instSize', label: 'Class' },
-            { key: 'ami', label: 'AMI ID' }, { key: 'hv', label: 'Hypervisor' }, { key: 'os', label: 'OS' }, 
+            { key: 'ami', label: 'AMI ID' }, { key: 'hv', label: 'Hypervisor' }, { key: 'os', label: 'OS' }, { key: 'amiOs', label: 'AMI OS' },
             { key: 'boot', label: 'Boot' }, { key: 'iops', label: 'IOPS' }, { key: 'tput', label: 'Tput' }
         ];
 
@@ -495,6 +500,31 @@
             if (nitroFamilies.includes(family)) return "Nitro";
             if (xenFamilies.includes(family)) return "Xen";
             return "Unknown";
+        }
+
+        function getOSFromAMI(image) {
+            const name = (image.Name || '').toLowerCase();
+            const desc = (image.Description || '').toLowerCase();
+            const combined = name + ' ' + desc;
+            if (combined.includes('bottlerocket')) return 'Bottlerocket';
+            if (combined.includes('windows')) return 'Windows';
+            if (combined.includes('ubuntu')) return 'Ubuntu';
+            if (combined.includes('al2023') || combined.includes('amazon linux 2023') || combined.includes('amzn2023')) return 'Amazon Linux 2023';
+            if (combined.includes('eks') && combined.includes('al2')) return 'Amazon Linux 2';
+            if (combined.includes('amzn2') || combined.includes('amazon linux 2')) return 'Amazon Linux 2';
+            if (combined.includes('amazon linux') || combined.includes('amzn')) return 'Amazon Linux';
+            if (combined.includes('rhel') || combined.includes('red hat enterprise linux') || combined.includes('red hat')) return 'RHEL';
+            if (combined.includes('centos')) return 'CentOS';
+            if (combined.includes('suse') || combined.includes('sles')) return 'SUSE';
+            if (combined.includes('debian')) return 'Debian';
+            if (combined.includes('fedora')) return 'Fedora';
+            if (combined.includes('flatcar') || combined.includes('coreos')) return 'CoreOS';
+            if (combined.includes('oracle linux') || combined.includes('oracle-linux')) return 'Oracle Linux';
+            if (combined.includes('rocky linux') || combined.includes('rockylinux') || combined.includes('rocky-linux')) return 'Rocky Linux';
+            if (combined.includes('alma linux') || combined.includes('almalinux')) return 'AlmaLinux';
+            if (combined.includes('kali')) return 'Kali Linux';
+            if (combined.includes('macos') || name.includes('mac2') || name.includes('mac-m')) return 'macOS';
+            return image.PlatformDetails || '-';
         }
 
 const instanceIopsMap = {
@@ -838,7 +868,8 @@ const instanceTputMap = {
                             ami: 'N/A',
                             hv: getHypervisor(instMeta.type),
                             os: instMeta ? instMeta.os : "-",
-                            boot: instMeta && instMeta.rootDevice ? (p[0] === instMeta.rootDevice ? "Yes" : "No") : "No",
+                            amiOs: '-',
+                            boot: (instMeta && instMeta.rootDevice && p[0] === instMeta.rootDevice) ? 'boot' : 'non boot',
                             iops: iopsVal,
                             tput: tputVal,
                             worthiness: worth,
@@ -911,10 +942,24 @@ const instanceTputMap = {
 
                 // Step 3: Extract Instances into a Map for lookup
                 const instanceMap = new Map();
+
+                // Build AMI description map for OS detection
+                const amiDescMap = new Map();
+                const amiSection = block.split(/-------------------- AMI DESCRIPTIONS -----------------/)[1];
+                if (amiSection) {
+                    const amiJsonText = amiSection.split(/--------------------/)[0].trim();
+                    const amiData = safeParseJSON(amiJsonText);
+                    if (amiData && amiData.Images) {
+                        amiData.Images.forEach(img => {
+                            if (img.ImageId) amiDescMap.set(img.ImageId, img);
+                        });
+                    }
+                }
+
                 const instanceSection = block.split(/-------------------- EC2 INSTANCES --------------------/)[1];
                 if (instanceSection) {
                     const instJsonText = instanceSection.split(/--------------------/)[0].trim();
-                    
+
                     // Pre-count attached volumes for each instance
                     const attachedVolumeCounts = new Map();
                     const ebsSectionForCount = block.split(/-------------------- EBS VOLUMES ----------------------/)[1];
@@ -926,10 +971,12 @@ const instanceTputMap = {
 
                     (safeParseJSON(instJsonText) || []).forEach(wrapper => {
                         wrapper.Instances.forEach(inst => {
+                            const amiImg = amiDescMap.get(inst.ImageId);
                             instanceMap.set(inst.InstanceId, {
                                 type: inst.InstanceType,
                                 ami: inst.ImageId,
                                 os: inst.OS || inst.PlatformDetails || inst.Platform || '-',
+                                amiOs: amiImg ? getOSFromAMI(amiImg) : '-',
                                 rootDevice: inst.RootDeviceName || inst.RootDevice || null,
                                 attachedVolumes: attachedVolumeCounts.get(inst.InstanceId) || 0
                             });
@@ -950,12 +997,21 @@ const instanceTputMap = {
                             type: v.State === 'available' ? 'Available' : 'None',
                             ami: '-',
                             os: '-',
+                            amiOs: '-',
                             rootDevice: null,
                             attachedVolumes: 0
                         };
                         let isBoot = false;
                         if (v.Device && instMeta.rootDevice && v.Device === instMeta.rootDevice) {
                             isBoot = true;
+                        }
+                        let bootVal;
+                        if (isBoot) {
+                            bootVal = 'boot';
+                        } else if (instMeta.amiOs === 'Bottlerocket' && v.Device === '/dev/xvdb') {
+                            bootVal = 'BR Local';
+                        } else {
+                            bootVal = 'non boot';
                         }
                         let worth = "N/A";
                         if (dType === 'gp2' || dType === 'gp3') {
@@ -1005,7 +1061,8 @@ const instanceTputMap = {
                             ami: instMeta.ami,
                             hv: getHypervisor(instMeta.type),
                             os: instMeta.os,
-                            boot: isBoot ? "Yes" : "No",
+                            amiOs: instMeta.amiOs || '-',
+                            boot: bootVal,
                             iops: v.Iops || 0,
                             tput: v.Throughput || 0,
                             worthiness: worth,
@@ -1179,7 +1236,7 @@ const instanceTputMap = {
                 <td><span class="tag ${typeTag}">${v.diskType}</span></td>
                 <td><b style="color:var(--df-accent-blue)">${v.size.toLocaleString()}</b></td>
                 <td>${v.instType}</td><td>${v.instSize}</td><td style="font-family:monospace; font-size:10px;">${v.ami}</td>
-                <td><span class="tag ${hvTag}">${v.hv}</span></td><td>${v.os}</td><td>${v.boot === 'Yes' ? '<span class="tag tag-boot">Boot</span>' : 'No'}</td>
+                <td><span class="tag ${hvTag}">${v.hv}</span></td><td>${v.os}</td><td>${v.amiOs}</td><td>${v.boot === 'boot' ? '<span class="tag tag-boot">boot</span>' : v.boot === 'BR Local' ? '<span class="tag tag-br-local">BR Local</span>' : 'non boot'}</td>
                 <td>${v.iops ? v.iops.toLocaleString() : '-'}</td><td>${v.tput ? v.tput.toLocaleString() : '-'}</td>
                 <td style="color: ${opStatusColor}; font-weight: bold;">${v.overprovisioned}</td>
                 <td style="color: ${worthColor}; font-weight: bold;">${v.worthiness}</td>
@@ -1266,7 +1323,7 @@ const instanceTputMap = {
             Array.from(document.getElementById('filter-diskType').options).forEach(o => { if (['gp2', 'gp3'].includes(o.value)) o.selected = true; });
             Array.from(document.getElementById('filter-size').options).forEach(o => { if (parseInt(o.value) >= 50) o.selected = true; });
             Array.from(document.getElementById('filter-hv').options).forEach(o => { if (o.value === 'Nitro') o.selected = true; });
-            Array.from(document.getElementById('filter-boot').options).forEach(o => { if (o.value === 'No') o.selected = true; });
+            Array.from(document.getElementById('filter-boot').options).forEach(o => { if (o.value === 'non boot') o.selected = true; });
             Array.from(document.getElementById('filter-os').options).forEach(o => { if (targetOS.includes(o.value)) o.selected = true; });
             Array.from(document.getElementById('filter-instSize').options).forEach(o => { if (large.includes(o.value)) o.selected = true; });
             filterTable();
