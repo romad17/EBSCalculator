@@ -463,6 +463,8 @@
         let snapshotData = [];
         let dlmData = [];
         let backupData = [];
+        let missingAmiLookups = new Map(); // ami -> region, for AMIs absent from AMI DESCRIPTIONS
+        const amiOsCache = new Map(JSON.parse(localStorage.getItem('amiOsCache') || '[]'));
         let totalScannedAccounts = 0;
         let totalFailedAccounts = 0;
         const colConfig = [
@@ -503,27 +505,121 @@
         }
 
         function getOSFromAMI(image) {
-            const name = (image.Name || '').toLowerCase();
-            const desc = (image.Description || '').toLowerCase();
-            const combined = name + ' ' + desc;
-            if (combined.includes('bottlerocket')) return 'Bottlerocket';
-            if (combined.includes('windows')) return 'Windows';
-            if (combined.includes('ubuntu')) return 'Ubuntu';
-            if (combined.includes('al2023') || combined.includes('amazon linux 2023') || combined.includes('amzn2023')) return 'Amazon Linux 2023';
-            if (combined.includes('eks') && combined.includes('al2')) return 'Amazon Linux 2';
-            if (combined.includes('amzn2') || combined.includes('amazon linux 2')) return 'Amazon Linux 2';
+            const name = image.Name || '';
+            const desc = image.Description || '';
+            const nameLow = name.toLowerCase();
+            const combined = nameLow + ' ' + desc.toLowerCase();
+
+            // Bottlerocket — e.g. bottlerocket-aws-k8s-1.33-x86_64-v1.55.0-...
+            if (combined.includes('bottlerocket')) {
+                const v = name.match(/[_-]v(\d+\.\d+\.\d+)/i);
+                return v ? `Bottlerocket ${v[1]}` : 'Bottlerocket';
+            }
+
+            // Windows — e.g. Windows_Server-2022-..., WindowsServer2019-...
+            if (combined.includes('windows')) {
+                const m = name.match(/Windows[_]?Server[_-]?(\d{4})(?:[_-](R\d))?/i);
+                if (m) return `Windows Server ${m[1]}${m[2] ? ' ' + m[2] : ''}`;
+                return 'Windows';
+            }
+
+            // Ubuntu — version number always present in name e.g. ubuntu-jammy-22.04-amd64
+            if (combined.includes('ubuntu')) {
+                const v = name.match(/(\d{2}\.\d{2})/) || desc.match(/(\d{2}\.\d{2})/);
+                if (v) return `Ubuntu ${v[1]}`;
+                const codenames = {
+                    plucky: '25.04', oracular: '24.10', noble: '24.04', mantic: '23.10',
+                    lunar: '23.04', kinetic: '22.10', jammy: '22.04', impish: '21.10',
+                    hirsute: '21.04', groovy: '20.10', focal: '20.04', eoan: '19.10',
+                    disco: '19.04', cosmic: '18.10', bionic: '18.04', xenial: '16.04'
+                };
+                for (const [codename, ver] of Object.entries(codenames)) {
+                    if (combined.includes(codename)) return `Ubuntu ${ver}`;
+                }
+                return 'Ubuntu';
+            }
+
+            // Amazon Linux 2023 — e.g. al2023-ami-2023.5.x-kernel-6.1-x86_64
+            if (combined.includes('al2023') || combined.includes('amazon linux 2023') || combined.includes('amzn2023')) {
+                const v = name.match(/2023\.(\d+\.\d+)/);
+                return v ? `Amazon Linux 2023.${v[1]}` : 'Amazon Linux 2023';
+            }
+
+            // Amazon Linux 2
+            if ((combined.includes('eks') && combined.includes('al2')) || combined.includes('amzn2') || combined.includes('amazon linux 2')) {
+                return 'Amazon Linux 2';
+            }
+
+            // Amazon Linux 1
             if (combined.includes('amazon linux') || combined.includes('amzn')) return 'Amazon Linux';
-            if (combined.includes('rhel') || combined.includes('red hat enterprise linux') || combined.includes('red hat')) return 'RHEL';
-            if (combined.includes('centos')) return 'CentOS';
-            if (combined.includes('suse') || combined.includes('sles')) return 'SUSE';
-            if (combined.includes('debian')) return 'Debian';
-            if (combined.includes('fedora')) return 'Fedora';
-            if (combined.includes('flatcar') || combined.includes('coreos')) return 'CoreOS';
-            if (combined.includes('oracle linux') || combined.includes('oracle-linux')) return 'Oracle Linux';
-            if (combined.includes('rocky linux') || combined.includes('rockylinux') || combined.includes('rocky-linux')) return 'Rocky Linux';
-            if (combined.includes('alma linux') || combined.includes('almalinux')) return 'AlmaLinux';
+
+            // RHEL — e.g. RHEL-9.3.0_HVM-20231101-x86_64
+            if (combined.includes('rhel') || combined.includes('red hat')) {
+                const v = name.match(/RHEL[_-](\d+\.\d+)/i);
+                return v ? `RHEL ${v[1]}` : 'RHEL';
+            }
+
+            // CentOS — e.g. CentOS-Stream-9, CentOS-7
+            if (combined.includes('centos')) {
+                const stream = combined.match(/centos[\s_-]?stream[\s_-]?(\d+)/);
+                if (stream) return `CentOS Stream ${stream[1]}`;
+                const v = name.match(/CentOS[\s_-](\d+(?:\.\d+)?)/i);
+                return v ? `CentOS ${v[1]}` : 'CentOS';
+            }
+
+            // Debian — e.g. debian-12-amd64-*
+            if (combined.includes('debian')) {
+                const codenames = { bookworm: '12', bullseye: '11', buster: '10', stretch: '9', jessie: '8' };
+                for (const [codename, ver] of Object.entries(codenames)) {
+                    if (combined.includes(codename)) return `Debian ${ver}`;
+                }
+                const v = name.match(/debian[_-](\d+)/i);
+                return v ? `Debian ${v[1]}` : 'Debian';
+            }
+
+            // SUSE — e.g. suse-sles-15-sp5-*
+            if (combined.includes('suse') || combined.includes('sles')) {
+                const v = name.match(/sles?[_-](\d+)(?:[_-](sp\d+))?/i);
+                return v ? `SUSE ${v[1]}${v[2] ? ' ' + v[2].toUpperCase() : ''}` : 'SUSE';
+            }
+
+            // Fedora
+            if (combined.includes('fedora')) {
+                const v = combined.match(/fedora[\s_-]?(\d+)/);
+                return v ? `Fedora ${v[1]}` : 'Fedora';
+            }
+
+            // Flatcar / CoreOS
+            if (combined.includes('flatcar')) {
+                const v = name.match(/(\d+\.\d+\.\d+)/);
+                return v ? `Flatcar ${v[1]}` : 'Flatcar';
+            }
+            if (combined.includes('coreos')) return 'CoreOS';
+
+            // Oracle Linux — e.g. OL9.3-x86_64-HVM-*
+            if (combined.includes('oracle') || /\bol[89]/.test(combined)) {
+                const v = name.match(/(?:OL|Oracle[_-]?Linux)[_-]?(\d+(?:[_.]\d+)?)/i);
+                return v ? `Oracle Linux ${v[1].replace('_', '.')}` : 'Oracle Linux';
+            }
+
+            // Rocky Linux
+            if (combined.includes('rocky')) {
+                const v = name.match(/Rocky[_-]?(?:Linux)?[_-]?(\d+(?:[_.]\d+)?)/i);
+                return v ? `Rocky Linux ${v[1].replace('_', '.')}` : 'Rocky Linux';
+            }
+
+            // AlmaLinux
+            if (combined.includes('alma')) {
+                const v = name.match(/Alma[_-]?Linux[_-]?(\d+(?:[_.]\d+)?)/i);
+                return v ? `AlmaLinux ${v[1].replace('_', '.')}` : 'AlmaLinux';
+            }
+
+            // Kali
             if (combined.includes('kali')) return 'Kali Linux';
-            if (combined.includes('macos') || name.includes('mac2') || name.includes('mac-m')) return 'macOS';
+
+            // macOS
+            if (combined.includes('macos') || nameLow.includes('mac2') || nameLow.includes('mac-m')) return 'macOS';
+
             return image.PlatformDetails || '-';
         }
 
@@ -881,17 +977,56 @@ const instanceTputMap = {
             });
         }
 
-        function parseAndDisplay(rawText) {
+        async function parseAndDisplay(rawText) {
             volumeData = [];
             snapshotData = [];
             dlmData = [];
             backupData = [];
+            missingAmiLookups = new Map();
 
             // Detect format and delegate
             if (!rawText.includes('-------------------- EC2 INSTANCES --------------------')) {
                 parseOldFormat(rawText);
             } else {
                 parseNewFormat(rawText);
+            }
+
+            // Fetch AMI details for any AMIs absent from the AMI DESCRIPTIONS section
+            if (missingAmiLookups.size > 0) {
+                const amiResolved = new Map();
+                const toFetch = [];
+                for (const [amiId, region] of missingAmiLookups) {
+                    if (amiOsCache.has(amiId)) {
+                        amiResolved.set(amiId, amiOsCache.get(amiId));
+                    } else {
+                        toFetch.push([amiId, region]);
+                    }
+                }
+                if (toFetch.length > 0) {
+                    await Promise.all(toFetch.map(async ([amiId, region]) => {
+                        try {
+                            const res = await fetch(`https://bos.datafy.io/check-ami?ami=${amiId}&region=${encodeURIComponent(region)}`);
+                            const data = await res.json();
+                            const body = data.body || data;
+                            if (body && (body.Name || body.Description)) {
+                                const os = getOSFromAMI(body);
+                                amiResolved.set(amiId, os);
+                                amiOsCache.set(amiId, os);
+                            }
+                        } catch (_) {}
+                    }));
+                    localStorage.setItem('amiOsCache', JSON.stringify([...amiOsCache]));
+                }
+                if (amiResolved.size > 0) {
+                    volumeData.forEach(v => {
+                        if (v.amiOs === '-' && v.ami && amiResolved.has(v.ami)) {
+                            v.amiOs = amiResolved.get(v.ami);
+                            if (v.boot === 'non boot' && v.amiOs === 'Bottlerocket' && v.path === '/dev/xvdb') {
+                                v.boot = 'BR Local';
+                            }
+                        }
+                    });
+                }
             }
 
             // Final UI Refresh
@@ -972,6 +1107,9 @@ const instanceTputMap = {
                     (safeParseJSON(instJsonText) || []).forEach(wrapper => {
                         wrapper.Instances.forEach(inst => {
                             const amiImg = amiDescMap.get(inst.ImageId);
+                            if (!amiImg && inst.ImageId && inst.ImageId.startsWith('ami-')) {
+                                missingAmiLookups.set(inst.ImageId, regionName);
+                            }
                             instanceMap.set(inst.InstanceId, {
                                 type: inst.InstanceType,
                                 ami: inst.ImageId,
