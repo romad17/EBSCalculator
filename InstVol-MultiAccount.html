@@ -293,6 +293,11 @@
             color: #fecaca;
         }
 
+        .tag-unattached {
+            background: #1e293b;
+            color: #64748b;
+        }
+
         .tag-br-local {
             background: #134e4a;
             color: #99f6e4;
@@ -337,7 +342,10 @@
     <div class="container">
         <div class="card">
             <div class="controls">
-                <input type="file" id="fileInput" accept=".log,.txt" class="btn btn-outline">
+                <label id="dropZone" class="btn btn-outline" style="cursor:pointer; display:inline-flex; align-items:center; gap:0.4rem;">
+                    <span id="dropZoneLabel">Choose file or drop here</span>
+                    <input type="file" id="fileInput" accept=".log,.txt" style="display:none;">
+                </label>
                 <input type="text" id="searchBar" placeholder="Search accounts, volumes..." onkeyup="filterTable()">
                 <button class="btn btn-primary" onclick="applyDefaults()">Apply Optimization Defaults</button>
                 <button class="btn btn-outline" onclick="resetFilters()">Reset</button>
@@ -475,7 +483,7 @@
             { key: 'boot', label: 'Boot' }, { key: 'iops', label: 'IOPS' }, { key: 'tput', label: 'Tput' }
         ];
 
-        colConfig.splice(15, 0, { key: 'overprovisioned', label: 'Overprovisioned' });
+        colConfig.splice(16, 0, { key: 'overprovisioned', label: 'Overprovisioned' });
         colConfig.push({ key: 'worthiness', label: 'Autoscale Worthy' }, { key: 'freeSlots', label: 'Free Slots' });
         
         const nitroFamilies = [
@@ -499,6 +507,7 @@
         function getHypervisor(instanceType) {
             if (!instanceType || instanceType === '-' || instanceType === 'None' || instanceType === 'Available') return "-";
             const family = instanceType.toLowerCase().split('.')[0];
+            if (family.startsWith('mac')) return "Mac";
             if (nitroFamilies.includes(family)) return "Nitro";
             if (xenFamilies.includes(family)) return "Xen";
             return "Unknown";
@@ -541,8 +550,7 @@
 
             // Amazon Linux 2023 — e.g. al2023-ami-2023.5.x-kernel-6.1-x86_64
             if (combined.includes('al2023') || combined.includes('amazon linux 2023') || combined.includes('amzn2023')) {
-                const v = name.match(/2023\.(\d+\.\d+)/);
-                return v ? `Amazon Linux 2023.${v[1]}` : 'Amazon Linux 2023';
+                return 'Amazon Linux 2023';
             }
 
             // Amazon Linux 2
@@ -847,12 +855,33 @@ const instanceTputMap = {
             }
         }
 
-        document.getElementById('fileInput').addEventListener('change', function (e) {
-            const file = e.target.files[0];
+        function loadFile(file) {
             if (!file) return;
+            document.getElementById('dropZoneLabel').textContent = file.name;
             const reader = new FileReader();
             reader.onload = (event) => parseAndDisplay(event.target.result);
             reader.readAsText(file);
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function (e) {
+            loadFile(e.target.files[0]);
+        });
+
+        const dropZone = document.getElementById('dropZone');
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.background = '#1e293b';
+            dropZone.style.borderColor = 'var(--df-action-blue)';
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.background = '';
+            dropZone.style.borderColor = '';
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.background = '';
+            dropZone.style.borderColor = '';
+            loadFile(e.dataTransfer.files[0]);
         });
 
         function parseOldFormat(rawText) {
@@ -965,7 +994,7 @@ const instanceTputMap = {
                             hv: getHypervisor(instMeta.type),
                             os: instMeta ? instMeta.os : "-",
                             amiOs: '-',
-                            boot: (instMeta && instMeta.rootDevice && p[0] === instMeta.rootDevice) ? 'boot' : 'non boot',
+                            boot: instMeta.type === 'Available' ? 'unattached' : (instMeta && instMeta.rootDevice && p[0] === instMeta.rootDevice) ? 'boot' : 'non boot',
                             iops: iopsVal,
                             tput: tputVal,
                             worthiness: worth,
@@ -1144,7 +1173,9 @@ const instanceTputMap = {
                             isBoot = true;
                         }
                         let bootVal;
-                        if (isBoot) {
+                        if (instMeta.type === 'Available') {
+                            bootVal = 'unattached';
+                        } else if (isBoot) {
                             bootVal = 'boot';
                         } else if (instMeta.amiOs === 'Bottlerocket' && v.Device === '/dev/xvdb') {
                             bootVal = 'BR Local';
@@ -1374,7 +1405,7 @@ const instanceTputMap = {
                 <td><span class="tag ${typeTag}">${v.diskType}</span></td>
                 <td><b style="color:var(--df-accent-blue)">${v.size.toLocaleString()}</b></td>
                 <td>${v.instType}</td><td>${v.instSize}</td><td style="font-family:monospace; font-size:10px;">${v.ami}</td>
-                <td><span class="tag ${hvTag}">${v.hv}</span></td><td>${v.os}</td><td>${v.amiOs}</td><td>${v.boot === 'boot' ? '<span class="tag tag-boot">boot</span>' : v.boot === 'BR Local' ? '<span class="tag tag-br-local">BR Local</span>' : 'non boot'}</td>
+                <td><span class="tag ${hvTag}">${v.hv}</span></td><td>${v.os}</td><td>${v.amiOs}</td><td>${v.boot === 'boot' ? '<span class="tag tag-boot">boot</span>' : v.boot === 'BR Local' ? '<span class="tag tag-br-local">BR Local</span>' : v.boot === 'unattached' ? '<span class="tag tag-unattached">Unattached</span>' : 'non boot'}</td>
                 <td>${v.iops ? v.iops.toLocaleString() : '-'}</td><td>${v.tput ? v.tput.toLocaleString() : '-'}</td>
                 <td style="color: ${opStatusColor}; font-weight: bold;">${v.overprovisioned}</td>
                 <td style="color: ${worthColor}; font-weight: bold;">${v.worthiness}</td>
